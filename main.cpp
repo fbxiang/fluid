@@ -78,24 +78,21 @@ void init(uint32_t width, uint32_t height) {
 int main() {
   FluidSystem fs;
   fs.fluid_domain.corner = {0, 0, 0};
-  fs.fluid_domain.size = {1, 2, 1};
-  fs.fluid_domain.step_size = 0.05;
+  fs.fluid_domain.size = {0.4, 0.8, 0.4};
+  fs.set_particle_size(0.03);
   fs.init();
 
-  // initialize particles
-  // random_fill_system(fs, 10);
-  fill_block(fs, {0.25, 0.5, 0.25}, {0.5, 1, 0.5});
-  fs.sort_particles();
-  log_system(fs);
+  fill_triangle(fs, {0.01, 0.01, 0.01}, {0.32, 0.32, 0.32});
 
   uint32_t w = 1200, h = 900;
   init(w, h);
 
   RenderUtil ru(&fs, w, h);
-  ru.renderer->debug = 1;
+  ru.renderer->debug = 0;
   ru.add_particles();
   // ru.add_fluid_domain_object();
 
+  int iter = 0;
   double time = glfwGetTime();
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
@@ -121,11 +118,17 @@ int main() {
     updateScene(ru.scene, dt);
     time = newTime;
 
+    // TODO: fix nan
     ru.render();
     glfwSwapBuffers(window);
-    printf("Step\n");
-    for (int i = 0; i < 1; ++i) {
+    // fs.show_profile();
+
+    for (int i = 0; i < 16; ++i) {
       fs.step();
+      iter++;
+      if (iter % 100 == 0) {
+        fs.sort_particles();
+      }
     }
   }
   return 0;

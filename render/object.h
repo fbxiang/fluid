@@ -83,3 +83,4 @@ std::shared_ptr<Object> NewNoisePlane(unsigned int res);
 std::shared_ptr<Object> NewDebugObject();
 std::shared_ptr<Object> NewPlane();
 std::shared_ptr<Object> NewCube();
+std::shared_ptr<Object> NewSphere();

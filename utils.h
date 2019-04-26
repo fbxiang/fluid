@@ -80,7 +80,7 @@ float rand_float(float start, float range) {
 std::ostream &operator<<(std::ostream &out, const std::vector<uint32_t> &ps) {
   out << "[ ";
   for (auto i : ps) {
-    out << i << " ";
+    out << i << ", ";
   }
   out << "]";
   return out;

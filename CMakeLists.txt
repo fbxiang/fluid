@@ -15,7 +15,7 @@ set(
 #   set(CMAKE_BUILD_TYPE Debug)
 # endif(NOT CMAKE_BUILD_TYPE)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -35,4 +35,4 @@ cuda_add_executable(run main.cpp fluid_domain.h fluid_system.h particle.h
   render/stb_image.h render/stb_image_write.h render/texture.h
   render/tiny_obj_loader.h render/noise/perlin.h )
 
-target_link_libraries(run ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp)
+target_link_libraries(run ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp pthread)

@@ -3,6 +3,7 @@
 #include "render/renderer.h"
 #include "render/scene.h"
 #include "utils.h"
+#include <glm/gtx/compatibility.hpp>
 
 class RenderUtil {
 public:
@@ -51,24 +52,29 @@ public:
   }
 
   void add_particles() {
-    particles.resize(fluid_system->particles.size());
+    particles.resize(fluid_system->positions.size());
     for (uint32_t i = 0; i < particles.size(); ++i) {
-      particles[i] = NewCube();
-      glm::vec3 pos = fluid_system->particles[i].position;
+      particles[i] = NewSphere();
+      glm::vec3 pos = fluid_system->positions[i];
       particles[i]->position = {pos.x, pos.y, pos.z};
       scene->addObject(particles[i]);
-      float scale = fluid_system->fluid_domain.step_size / 2.5f;
+      float scale = fluid_system->solver.particle_size / 2.f;
       particles[i]->scale = {scale, scale, scale};
-      glm::uvec3 size = fluid_system->fluid_domain.grid_size();
+      glm::uvec3 size = fluid_system->grid_size();
       particles[i]->material.kd = glm::vec3(0, 0.5, 0.75);
     }
   }
 
   void update_particles() {
     for (uint32_t i = 0; i < particles.size(); ++i) {
-      particles[i]->position = fluid_system->particles[i].position;
-      glm::uvec3 size = fluid_system->fluid_domain.grid_size();
-      particles[i]->material.kd = glm::vec3(0, 0.5, 0.75);
+      particles[i]->position = fluid_system->positions[i];
+      glm::uvec3 size = fluid_system->grid_size();
+      float ratio = fluid_system->rhos[i] / fluid_system->solver.rest_density;
+
+      float l = glm::clamp((ratio - 1.f) / 3.f, 0.f, 1.f);
+      auto color = glm::lerp(glm::vec3(0, 0.5, 0.75), glm::vec3(1, 0, 0), l);
+      
+      particles[i]->material.kd = color;
     }
   }
 };
