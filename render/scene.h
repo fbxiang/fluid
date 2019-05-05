@@ -21,6 +21,7 @@ class Scene : public std::enable_shared_from_this<Scene> {
   bool contains(const std::shared_ptr<Object> obj) const;
   void addObject(std::shared_ptr<Object> obj);
   void removeObject(std::shared_ptr<Object> obj);
+  void removeObjectsByName(std::string name);
   const std::vector<std::shared_ptr<Object>>& getObjects() const;
 
   void setMainCamera(const std::shared_ptr<Camera> cam);

@@ -1,11 +1,7 @@
-#include "fluid_system.h"
-#include "fluid_system2.h"
-#include "particle_generator.h"
+#include "sph_gpu.h"
 #include "render/input.h"
-#include "render_util.h"
-#include "utils.h"
+#include "sph_render_util.h"
 #include <iostream>
-#include "profiler.h"
 
 using std::cout;
 using std::endl;
@@ -77,15 +73,36 @@ void init(uint32_t width, uint32_t height) {
   fprintf(stdout, "OpenGL Version: %s\n", version);
 }
 
+inline float rand_float(float start, float range) {
+  float random = ((float)rand()) / (float)RAND_MAX;
+  float r = random * range;
+  return start + r;
+}
+
+void fill_block(SPH_GPU &sph, glm::vec3 corner, glm::vec3 size, float jitter_size=0.f) {
+  float step = sph.solver_params.particle_size;
+  std::vector<glm::vec3> positions;
+  glm::uvec3 n = size / step;
+  for (uint32_t i = 0; i < n.x; ++i) {
+    for (uint32_t j = 0; j < n.y; ++j) {
+      for (uint32_t k = 0; k < n.z; ++k) {
+        glm::vec3 jitter = {rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f)};
+        positions.push_back({{corner + glm::vec3(i, j, k) * step + jitter * jitter_size}});
+      }
+    }
+  }
+  sph.init(positions);
+}
+
 int main() {
-  FluidSystem fs;
+  SPH_GPU fs;
   fs.fluid_domain.corner = {0, 0, 0};
   fs.fluid_domain.size = {0.4, 0.8, 0.4};
-  fs.set_particle_size(0.02);
-  fs.init();
-
-  // fill_triangle(fs, {0.01, 0.01, 0.01}, {0.32, 0.32, 0.32});
+  fs.set_particle_size_and_density(0.03, 1000);
   fill_block(fs, {0.1, 0.01, 0.1}, {0.12, 0.7, 0.12});
+  fs.sim_init();
 
   uint32_t w = 1200, h = 900;
   init(w, h);
@@ -93,7 +110,6 @@ int main() {
   RenderUtil ru(&fs, w, h);
   ru.renderer->debug = 0;
   ru.add_particles();
-  // ru.add_fluid_domain_object();
 
   int frame = 0;
   int iter = 0;
@@ -123,17 +139,12 @@ int main() {
     time = newTime;
 
     ru.render();
-    // ru.render_grid();
     glfwSwapBuffers(window);
 
     for (int i = 0; i < 16; ++i) {
       fs.step();
       iter++;
-      if (iter % 100 == 0) {
-        fs.sort_particles();
-      }
     }
-    profiler::show();
   }
   return 0;
 }

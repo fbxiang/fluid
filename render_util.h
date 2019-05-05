@@ -4,6 +4,7 @@
 #include "render/scene.h"
 #include "utils.h"
 #include <glm/gtx/compatibility.hpp>
+#include <iostream>
 
 class RenderUtil {
 public:
@@ -41,6 +42,10 @@ public:
     renderer->renderScene(scene);
   }
 
+  void renderToFile(uint32_t i = 0) {
+    renderer->renderSceneToFile(scene, "/tmp/sph_" + std::to_string(i) + ".png");
+  }
+
   void add_fluid_domain_object() {
     domain = NewCube();
     auto size = fluid_system->fluid_domain.size;
@@ -73,8 +78,40 @@ public:
 
       float l = glm::clamp((ratio - 1.f) / 3.f, 0.f, 1.f);
       auto color = glm::lerp(glm::vec3(0, 0.5, 0.75), glm::vec3(1, 0, 0), l);
-      
+
       particles[i]->material.kd = color;
     }
+  }
+
+  void render_grid() {
+    scene->removeObjectsByName("grid_point");
+    float grid_step = fluid_system->solver.particle_size / 2.f;
+    glm::vec3 corner = fluid_system->fluid_domain.corner;
+    glm::vec3 size = fluid_system->fluid_domain.size;
+    glm::uvec3 grid = size / grid_step;
+
+    int g = 0;
+    for (uint32_t i = 0; i < grid.x; ++i) {
+      for (uint32_t j = 0; j < grid.x; ++j) {
+        for (uint32_t k = 0; k < grid.x; ++k) {
+          glm::vec3 point = corner + glm::vec3(i, j, k) * grid_step;
+          // if (fluid_system->check_neighbors_at(point)) {
+
+          float density = fluid_system->compute_density_at(point);
+
+          if (density > 800) {
+            auto obj = NewSphere();
+            obj->name = "grid_point";
+            obj->position = point;
+            float scale = grid_step / 2.f;
+            obj->scale = {scale, scale, scale};
+            obj->material.kd = {1, 0, 0};
+            scene->addObject(obj);
+            g++;
+          }
+        }
+      }
+    }
+    cout << g << " Found" << endl;
   }
 };

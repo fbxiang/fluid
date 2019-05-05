@@ -185,8 +185,9 @@ void Renderer::gbufferPass(std::shared_ptr<Scene> scene, GLuint fbo) {
     shader->setTexture("material.normal_map", obj->material.normal_map->getId(), 3);
     shader->setBool("material.has_normal_map", obj->material.normal_map->getId() != 0);
 
-    glBindVertexArray(mesh->getVAO());
-    glDrawElements(GL_TRIANGLES, mesh->getIndices().size(), GL_UNSIGNED_INT, 0);
+    mesh->draw();
+    // glBindVertexArray(mesh->getVAO());
+    // glDrawElements(GL_TRIANGLES, mesh->getIndices().size(), GL_UNSIGNED_INT, 0);
   }
 }
 

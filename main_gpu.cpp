@@ -1,8 +1,6 @@
-#include "fluid_system.h"
-#include "fluid_system2.h"
-#include "particle_generator.h"
+#include "sph_gpu.h"
 #include "render/input.h"
-#include "render_util.h"
+#include "gpu_render_util.h"
 #include "utils.h"
 #include <iostream>
 #include "profiler.h"
@@ -77,23 +75,38 @@ void init(uint32_t width, uint32_t height) {
   fprintf(stdout, "OpenGL Version: %s\n", version);
 }
 
+std::vector<glm::vec3> fill_block(glm::vec3 corner, glm::vec3 size,
+                                  float step) {
+  std::vector<glm::vec3> positions;
+  glm::ivec3 n = size / step;
+  for (uint32_t i = 0; i < n.x; ++i) {
+    for (uint32_t j = 0; j < n.y; ++j) {
+      for (uint32_t k = 0; k < n.z; ++k) {
+        glm::vec3 jitter = {rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f)};
+        positions.push_back({{corner + glm::vec3(i, j, k) * step + jitter}});
+      }
+    }
+  }
+  return positions;
+}
+
 int main() {
-  FluidSystem fs;
-  fs.fluid_domain.corner = {0, 0, 0};
-  fs.fluid_domain.size = {0.4, 0.8, 0.4};
-  fs.set_particle_size(0.02);
-  fs.init();
+  float h = 0.013;
+  SPH_GPU fs(h);
+  fs.set_domain({0, 0, 0}, {0.5, 1.0, 0.5});
+  fs.cuda_init();
+  std::vector<glm::vec3> positions = fill_block({0.1, 0.1, 0.1}, {0.3, 0.3, 0.3}, h);
+  fs.add_particles(positions);
+  sph::print_summary();
 
-  // fill_triangle(fs, {0.01, 0.01, 0.01}, {0.32, 0.32, 0.32});
-  fill_block(fs, {0.1, 0.01, 0.1}, {0.12, 0.7, 0.12});
+  uint32_t W = 1200, H = 900;
+  init(W, H);
 
-  uint32_t w = 1200, h = 900;
-  init(w, h);
-
-  RenderUtil ru(&fs, w, h);
+  GPURenderUtil ru(&fs, W, H);
   ru.renderer->debug = 0;
   ru.add_particles();
-  // ru.add_fluid_domain_object();
 
   int frame = 0;
   int iter = 0;
@@ -126,14 +139,12 @@ int main() {
     // ru.render_grid();
     glfwSwapBuffers(window);
 
-    for (int i = 0; i < 16; ++i) {
-      fs.step();
-      iter++;
-      if (iter % 100 == 0) {
-        fs.sort_particles();
-      }
+    float time = 0;
+    while (time < 1.f / 60.f) {
+      float dt = fs.step_regular();
+      // printf("Time step: %f\n", dt);
+      time += dt;
     }
-    profiler::show();
   }
   return 0;
 }

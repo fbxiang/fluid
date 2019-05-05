@@ -51,5 +51,13 @@ void writeToFile(GLuint textureId, GLuint width, GLuint height, std::string file
   uint8_t data[width * height * 4];
   glBindTexture(GL_TEXTURE_2D, textureId);
   glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+  for (uint32_t h1 = 0; h1 < height / 2; ++h1) {
+    uint32_t h2 = height - 1 - h1;
+    for (uint32_t i = 0; i < 4 * width; ++i) {
+      std::swap(data[h1 * width * 4 + i], data[h2 * width * 4 + i]);
+    }
+  }
+
   stbi_write_png(filename.c_str(), width, height, 4, data, width * 4);
 }

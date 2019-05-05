@@ -25,9 +25,12 @@ void Scene::removeObject(std::shared_ptr<Object> obj) {
     return;
   }
   obj->setScene(nullptr);
-  std::remove_if(objects.begin(), objects.end(), [&](auto o) { return obj == o; });
+  std::remove_if(objects.begin(), objects.end(), [&](std::shared_ptr<Object> o) { return obj == o; });
 }
 
+void Scene::removeObjectsByName(std::string name) {
+  std::remove_if(objects.begin(), objects.end(), [&](std::shared_ptr<Object> o) { return o->name == name; });
+}
 
 void Scene::setMainCamera(const std::shared_ptr<Camera> cam) {
   if (contains(cam)) {

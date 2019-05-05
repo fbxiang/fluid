@@ -30,7 +30,7 @@ struct Material {
 
 class Object: public std::enable_shared_from_this<Object> {
  protected:
-  std::shared_ptr<TriangleMesh> mesh;
+  std::shared_ptr<MeshBase> mesh;
 
  public:
   Shader* shader;
@@ -45,7 +45,7 @@ class Object: public std::enable_shared_from_this<Object> {
   std::weak_ptr<Scene> scene;
 
  public:
-  Object(std::shared_ptr<TriangleMesh> m = nullptr)
+  Object(std::shared_ptr<MeshBase> m = nullptr)
       : shader(nullptr)
       , mesh(m)
       , name("")
@@ -60,12 +60,12 @@ class Object: public std::enable_shared_from_this<Object> {
   void setScene(const std::shared_ptr<Scene> inScene); 
   std::shared_ptr<Scene> getScene() const;
 
-  std::shared_ptr<TriangleMesh> getMesh() const;
+  std::shared_ptr<MeshBase> getMesh() const;
 };
 
 
 template<typename T>
-std::shared_ptr<T> NewObject(std::shared_ptr<TriangleMesh> mesh) {
+std::shared_ptr<T> NewObject(std::shared_ptr<MeshBase> mesh) {
   static_assert(std::is_base_of<Object, T>::value, "T must inherit from Obejct.");
   auto obj = std::make_shared<T>(mesh);
   return obj;
@@ -84,3 +84,5 @@ std::shared_ptr<Object> NewDebugObject();
 std::shared_ptr<Object> NewPlane();
 std::shared_ptr<Object> NewCube();
 std::shared_ptr<Object> NewSphere();
+std::shared_ptr<Object> NewLine();
+std::shared_ptr<Object> NewLineCube();

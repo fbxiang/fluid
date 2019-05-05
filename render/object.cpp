@@ -20,7 +20,7 @@ std::shared_ptr<Scene> Object::getScene() const {
   return std::shared_ptr<Scene>();
 }
 
-std::shared_ptr<TriangleMesh> Object::getMesh() const { return mesh; }
+std::shared_ptr<MeshBase> Object::getMesh() const { return mesh; }
 
 std::shared_ptr<Object> NewNoisePlane(unsigned int res) {
 
@@ -116,40 +116,68 @@ std::shared_ptr<Object> NewSphere() {
   int slices = 5;
   float radius = 1.f;
 
-  for (int i = 0; i <= stacks; ++i){
-        
-    GLfloat V   = i / (float) stacks;
-    GLfloat phi = V * glm::pi <float> ();
-        
+  for (int i = 0; i <= stacks; ++i) {
+
+    GLfloat V = i / (float)stacks;
+    GLfloat phi = V * glm::pi<float>();
+
     // Loop Through Slices
-    for (int j = 0; j <= slices; ++j){
-            
-      GLfloat U = j / (float) slices;
-      GLfloat theta = U * (glm::pi <float> () * 2);
-            
+    for (int j = 0; j <= slices; ++j) {
+
+      GLfloat U = j / (float)slices;
+      GLfloat theta = U * (glm::pi<float>() * 2);
+
       // Calc The Vertex Positions
-      GLfloat x = cosf (theta) * sinf (phi);
-      GLfloat y = cosf (phi);
-      GLfloat z = sinf (theta) * sinf (phi);
-            
+      GLfloat x = cosf(theta) * sinf(phi);
+      GLfloat y = cosf(phi);
+      GLfloat z = sinf(theta) * sinf(phi);
+
       // Push Back Vertex Data
-      vertices.push_back (Vertex({x * radius, y * radius, z * radius}));
+      vertices.push_back(Vertex({x * radius, y * radius, z * radius}));
     }
   }
-    
+
   // Calc The Index Positions
-  for (int i = 0; i < slices * stacks + slices; ++i){
-    indices.push_back (i);
-    indices.push_back (i + slices + 1);
-    indices.push_back (i + slices);
-        
-    indices.push_back (i + slices + 1);
-    indices.push_back (i);
-    indices.push_back (i + 1);
+  for (int i = 0; i < slices * stacks + slices; ++i) {
+    indices.push_back(i);
+    indices.push_back(i + slices + 1);
+    indices.push_back(i + slices);
+
+    indices.push_back(i + slices + 1);
+    indices.push_back(i);
+    indices.push_back(i + 1);
   }
 
-  auto obj =
-      NewObject<Object>(std::make_shared<TriangleMesh>(vertices, indices, true));
+  auto obj = NewObject<Object>(
+      std::make_shared<TriangleMesh>(vertices, indices, true));
   obj->name = "Sphere";
+  return obj;
+}
+
+std::shared_ptr<Object> NewLine() {
+  std::vector<Vertex> vertices;
+  std::vector<GLuint> indices;
+
+  vertices.push_back(Vertex({0, 0, 0}));
+  vertices.push_back(Vertex({1, 0, 0}));
+  indices.push_back(0);
+  indices.push_back(1);
+
+  auto obj = NewObject<Object>(std::make_shared<LineMesh>(vertices, indices));
+  obj->name = "Line";
+  return obj;
+}
+
+std::shared_ptr<Object> NewLineCube() {
+  std::vector<Vertex> vertices = {
+      Vertex(glm::vec3(-1.0, -1.0, 1.0)),  Vertex(glm::vec3(1.0, -1.0, 1.0)),
+      Vertex(glm::vec3(1.0, 1.0, 1.0)),    Vertex(glm::vec3(-1.0, 1.0, 1.0)),
+      Vertex(glm::vec3(-1.0, -1.0, -1.0)), Vertex(glm::vec3(1.0, -1.0, -1.0)),
+      Vertex(glm::vec3(1.0, 1.0, -1.0)),   Vertex(glm::vec3(-1.0, 1.0, -1.0))};
+
+  std::vector<GLuint> indices = {0, 1, 1, 2, 2, 3, 0, 3, 4, 5, 5, 6,
+                                 6, 7, 4, 7, 0, 4, 1, 5, 2, 6, 3, 7};
+  auto obj = NewObject<Object>(std::make_shared<LineMesh>(vertices, indices));
+  obj->name = "Line Cube";
   return obj;
 }
