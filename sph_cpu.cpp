@@ -141,13 +141,12 @@ void SPH_CPU::update_non_pressure_forces(){
 }
 
 void SPH_CPU::update_dt_by_CFL(){
-  dt = 0.001;
-  // float maxv2 = 0.01;
-  // for (uint32_t i = 0; i < size(); ++i) {
-  //   float v2 = glm::dot(velocities[i], velocities[i]);
-  //   maxv2 = std::max(v2, maxv2);
-  // }
-  // dt = 0.2f * solver_params.particle_size / std::sqrt(maxv2);
+  float maxv2 = 0.01;
+  for (uint32_t i = 0; i < size(); ++i) {
+    float v2 = glm::dot(velocities[i], velocities[i]);
+    maxv2 = std::max(v2, maxv2);
+  }
+  dt = 0.2f * solver_params.particle_size / std::sqrt(maxv2);
 }
 
 void SPH_CPU::update_predicted_velocities(){
@@ -206,8 +205,6 @@ void SPH_CPU::correct_density_error(){
     iter++;
     printf("Average density %f\n", avg);
   } while (iter < 2 || avg - solver_params.rest_density > 10);
-  int ss;
-  // printf("correct density error runs for %d iterations\n", iter);
 }
 
 void SPH_CPU::update_positions() {

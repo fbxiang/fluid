@@ -1,6 +1,3 @@
-#ifndef _SPH_CUH
-#define _SPH_CUH
-
 #include <cuda.h>
 #define GLM_FORCE_CUDA
 #include "sph_common.h"
@@ -25,7 +22,16 @@ float step_regular();
 void update_density();
 void update_factor();
 
-void debug_count_neighbors(int* h_out, int size);
-}
+namespace mc {
 
-#endif // _SPH_CUH
+int get_num_cells();
+
+void init(float cell_size);
+glm::vec3 get_grid_center(int idx);
+void print_summary();
+
+void update_grid_corners();
+
+void update_faces(float* vbo, int* h_total_num_faces);
+} // namespace mc
+}

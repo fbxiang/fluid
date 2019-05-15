@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 project(SPHFluid LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_FLAGS_DEBUG \"-o0 -g3 -Wall\")
-set(CMAKE_CXX_FLAGS_RELEASE \"-o3 -g0 -Wall\")
+set(CMAKE_CXX_FLAGS_DEBUG "-o0 -g3 -Wall")
+set(CMAKE_CXX_FLAGS_RELEASE "-o3 -g0 -Wall")
 
 find_package(CUDA REQUIRED)
-set(CMAKE_BUILD_TYPE DEBUG)
+set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS_DEBUG})
 
 set(
   CUDA_NVCC_FLAGS
@@ -39,16 +39,16 @@ file(GLOB_RECURSE RENDER_SRC "render/*.h" "render/*.cpp")
 # cuda_add_executable(run_df divergence_free.cpp sph_render_util.h sph_common.h
 #   sph_gpu.h sph_gpu.cpp sph_math.h ${RENDER_SRC})
 
-add_executable(run main_gpu.cpp sph_common.h sph_gpu.h sph_math.h gpu_render_util.h ${RENDER_SRC} sph.cuh sph.cu)
+add_executable(run main_gpu.cpp sph_common.h sph_gpu.h sph_math.h gpu_render_util.h ${RENDER_SRC} sph.cuh sph.cu marching_cube_table.h profiler.h profiler.cpp)
 
 
-# add_executable(run_test test/entry.cpp test/cuda.cpp sph_common.h sph.cuh sph.cu
-# sph_cpu.h sph_cpu.cpp)
+add_executable(run_test test/entry.cpp test/cuda.cpp sph_common.h sph_cpu.h
+  sph_cpu.cpp sph.cuh sph.cu marching_cube_table.h)
 
 
 target_link_libraries(run ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp pthread)
 # target_link_libraries(run_df ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp
 #   pthread)
 
-# target_link_libraries(run_test ${CUDA_LIBRARIES} ${Boost_LIBRARIES})
+target_link_libraries(run_test ${CUDA_LIBRARIES} ${Boost_LIBRARIES})
 

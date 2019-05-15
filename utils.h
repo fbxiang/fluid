@@ -138,7 +138,7 @@ inline void parallel_execution(uint32_t size, std::function<void(uint32_t)> f,
 }
 
 inline void pause_wait() {
-  printf("paused\n");
+  printf("press enter to continue...\n");
   while (getchar() != '\n') {
   }
 }

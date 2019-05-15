@@ -2,7 +2,8 @@
 #include "sph_math.h"
 #include <thrust/scan.h>
 #include <thrust/reduce.h>
-
+#include "marching_cube_table.h"
+#include "profiler.h"
 
 #define N_THREADS 1024
 #define CUDA_CHECK_RETURN(value)                                               \
@@ -48,6 +49,21 @@ int *d_sorted_particle_idx;
 __device__ float *rho;
 float *d_rho;
 
+__device__ float* tmp_float;
+float* d_tmp_float;
+
+/**** Regular solver ****/
+
+__device__ float* pressure;
+float* d_pressure;
+
+/**** End regular solver ****/
+
+/**** DF solver ****/
+
+__device__ glm::vec3 *velocities_pred;
+glm::vec3 *d_velocities_pred;
+
 __device__ float *rho_pred;
 float *d_rho_pred;
 
@@ -57,15 +73,10 @@ float *d_alpha;
 __device__ float *kappa;
 float *d_kappa;
 
-__device__ float *kappav;
-float *d_kappav;
+__device__ float *kappa_v;
+float *d_kappa_v;
 
-__device__ float* tmp_float;
-float* d_tmp_float;
-
-// only for regular solver
-__device__ float* pressure;
-float* d_pressure;
+/**** End DF solver ***/
 
 __device__ float dt;
 
@@ -311,19 +322,7 @@ void update_factor() {
   _update_factor<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
 }
 
-
-// DF solver
-__global__ void _update_non_pressure_forces(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    force[i] = params.particle_mass * params.g;
-  }
-}
-void update_non_pressure_forces(int n) {
-  _update_non_pressure_forces<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(n);
-}
-
-
+// regular solver
 __global__ void _update_pressure(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
@@ -331,7 +330,6 @@ __global__ void _update_pressure(int n) {
                   (powf(rho[i] / params.rest_density, params.gamma) - 1.f);
   }
 }
-// regular solver
 __global__ void _update_all_forces(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
@@ -386,12 +384,197 @@ void update_velocity_position() {
   _update_velocity_position<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
 }
 
-float step_regular() {
+
+// DF solver
+__global__ void _update_non_pressure_forces(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    force[i] = params.particle_mass * params.g;
+  }
+}
+void update_non_pressure_forces() {
+  _update_non_pressure_forces<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+}
+
+__global__ void _update_positions(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    positions[i] += sph::dt * velocities_pred[i];
+
+    if (positions[i].x < domain.corner.x + params.eps) {
+      velocities[i].x = 0.f;
+      positions[i].x = domain.corner.x + params.eps;
+    }
+    if (positions[i].y < domain.corner.y + params.eps) {
+      velocities[i].y = 0.f;
+      positions[i].y = domain.corner.y + params.eps;
+    }
+    if (positions[i].z < domain.corner.z + params.eps) {
+      velocities[i].z = 0.f;
+      positions[i].z = domain.corner.z + params.eps;
+    }
+
+    if (positions[i].x >= domain.corner.x + domain.size.x - params.eps) {
+      velocities[i].x = 0.f;
+      positions[i].x = domain.corner.x + domain.size.x - params.eps;
+    }
+    if (positions[i].y >= domain.corner.y + domain.size.y - params.eps) {
+      velocities[i].y = 0.f;
+      positions[i].y = domain.corner.y + domain.size.y - params.eps;
+    }
+    if (positions[i].z >= domain.corner.z + domain.size.z - params.eps) {
+      velocities[i].z = 0.f;
+      positions[i].z = domain.corner.z + domain.size.z - params.eps;
+    }
+  }
+}
+void update_positions() {
+  _update_positions<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+}
+
+__global__ void _update_factors(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    glm::vec3 vacc = {0,0,0};
+    float sacc = 0;
+    FOR_NEIGHBORS(
+      if (i == j) continue;
+      glm::vec3 dw = dw_ij(positions[i], positions[j], params.particle_size);
+      glm::vec3 s = params.particle_mass * dw;
+      vacc += s;
+      sacc += glm::dot(s, s);
+                  );
+    alpha[i] = rho[i] / (glm::dot(vacc, vacc) + sacc);
+  }
+}
+void update_factors() {
+  _update_factors<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+}
+
+__global__ void _update_velocities_pred(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    velocities_pred[i] = velocities[i] + dt * force[i] / params.particle_mass;
+  }
+}
+void update_velocities_pred() {
+  _update_velocities_pred<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+}
+
+__global__ void _correct_density_error_pass1(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float DrhoDt = -rho[i] * divergence(velocities_pred, i);
+    rho_pred[i] = rho[i] + dt * DrhoDt; // predict density
+    kappa[i] = (rho_pred[i] - params.rest_density) / (dt * dt) * alpha[i];
+  }
+}
+__global__ void _correct_density_error_pass2(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    glm::vec3 acc = {0, 0, 0};
+    FOR_NEIGHBORS(
+        if (i == j) continue;
+        acc += params.particle_mass * (kappa[i] / rho[i] + kappa[j] / rho[j]) *
+        dw_ij(positions[i], positions[j], params.particle_size););
+    velocities_pred[i] -= dt * acc;
+  }
+}
+void correct_density_error() {
+  int iter = 0;
+  float avg = 0.f;
+  do {
+    _correct_density_error_pass1<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+    _correct_density_error_pass2<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+    thrust::device_ptr<float> rho_pred_ptr = thrust::device_pointer_cast(d_rho_pred);
+    float sum = thrust::reduce(rho_pred_ptr, rho_pred_ptr + num_particles, (float)0, thrust::plus<float>());
+    avg = sum / (float)num_particles;
+
+    ++iter;
+  } while ((iter < 2) || (avg - h_params.rest_density) > 10);
+  // TODO: debug message here
+}
+
+
+__global__ void _correct_divergence_error_pass1(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float DrhoDt = -rho[i] * divergence(velocities_pred, i);
+    kappa_v[i] = 1.f / dt * DrhoDt * alpha[i];
+    tmp_float[i] = DrhoDt;  // cache DrhoDt
+  }
+}
+__global__ void _correct_divergence_error_pass2(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    glm::vec3 acc = {0, 0, 0};
+
+    FOR_NEIGHBORS(
+        if (i == j) continue;
+        acc += params.particle_mass * (kappa_v[i] / rho[i] + kappa_v[j] / rho[j]) *
+        dw_ij(positions[i], positions[j], params.particle_size);
+                 );
+    velocities_pred[i] -= dt * acc;
+  }
+}
+void correct_divergence_error() {
+  int iter = 0;
+  float avg = 0.f;
+  do {
+    _correct_divergence_error_pass1<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+    _correct_divergence_error_pass2<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+
+    thrust::device_ptr<float> tmp_ptr = thrust::device_pointer_cast(d_tmp_float);
+    float sum = thrust::reduce(tmp_ptr, tmp_ptr + num_particles, (float)0, thrust::plus<float>());
+    avg = sum / (float)num_particles;
+  } while ((avg > 10) && (iter < 10)); // 10 iterations max?
+  // TODO: debug message here
+}
+
+void update_velocities() {
+  cudaMemcpy(d_velocities, d_velocities_pred,
+             num_particles * sizeof(glm::vec3),
+             cudaMemcpyDeviceToDevice);
+}
+
+
+void df_init() {
   update_neighbors();
+  update_density();
+  update_factor();
+}
+
+void df_step() {
+  update_non_pressure_forces();
+  update_dt_by_CFL();
+  update_velocities_pred();
+
+  correct_density_error();
+  update_positions();
+
+  update_neighbors();
+  update_density();
+  update_factors();
+
+  correct_divergence_error();
+  update_velocities();
+}
+
+float step_regular() {
+  profiler::start("neighbors");
+  update_neighbors();
+  profiler::stop("neighbors");
+
+  profiler::start("density_pressure");
   float dt = update_dt_by_CFL();
   update_density();
   update_all_forces();
+  profiler::stop("density_pressure");
+
+  profiler::start("integration");
   update_velocity_position();
+  profiler::stop("integration");
+
   return dt;
 }
 
@@ -412,6 +595,7 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
   sph::max_num_particles = max_num_particles;
   sph::num_particles = 0;
 
+  // common quantities
   CUDA_CHECK_RETURN(cudaMalloc(&d_grid, num_cells * sizeof(int)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::grid, &d_grid, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
@@ -421,19 +605,16 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
                                        sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 
-  CUDA_CHECK_RETURN(
-      cudaMalloc(&d_positions, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMalloc(&d_positions, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::positions, &d_positions, sizeof(void *),
                                        0, cudaMemcpyHostToDevice));
 
-  CUDA_CHECK_RETURN(
-      cudaMalloc(&d_velocities, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMalloc(&d_velocities, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(
       sph::velocities, &d_velocities, sizeof(void *), 0, cudaMemcpyHostToDevice));
 
 
-  CUDA_CHECK_RETURN(
-      cudaMalloc(&d_force, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMalloc(&d_force, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(
       sph::force, &d_force, sizeof(void *), 0, cudaMemcpyHostToDevice));
 
@@ -462,16 +643,38 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa, &d_kappa, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 
-  CUDA_CHECK_RETURN(cudaMalloc(&d_kappav, max_num_particles * sizeof(float)));
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappav, &d_kappav, sizeof(void *), 0,
+  CUDA_CHECK_RETURN(cudaMalloc(&d_kappa_v, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa_v, &d_kappa_v, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 
   CUDA_CHECK_RETURN(cudaMalloc(&d_tmp_float, max_num_particles * sizeof(float)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::tmp_float, &d_tmp_float, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
   
+  // regular solver
   CUDA_CHECK_RETURN(cudaMalloc(&d_pressure, max_num_particles * sizeof(float)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::pressure, &d_pressure, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  // DF Solver
+  CUDA_CHECK_RETURN(cudaMalloc(&d_rho_pred, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::rho_pred, &d_rho_pred, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_alpha, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::alpha, &d_alpha, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_kappa, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa, &d_kappa, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_kappa_v, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa_v, &d_kappa_v, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_velocities_pred, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::velocities_pred, &d_velocities_pred, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 }
 
@@ -533,54 +736,293 @@ void print_summary() {
   log("Grid size", h_grid_size);
   log("Number of cells", num_cells);
   log();
-
-  // int h_cell_idx[num_particles];
-  // cudaMemcpy(h_cell_idx, d_cell_idx, num_particles * sizeof(int), cudaMemcpyDeviceToHost);
-  // log_array("cell_idx", h_cell_idx, num_particles);
-
-  // int *h_grid = new int[num_cells];
-  // cudaMemcpy(h_grid, d_grid, num_cells * sizeof(int), cudaMemcpyDeviceToHost);
-  // log("cell particle count");
-  // for (int i = 0; i < num_cells; ++i) {
-  //   if (h_grid[i] != 0) {
-  //     printf("%d %d\n", i, h_grid[i]);
-  //   }
-  // }
-  // delete [] h_grid;
-
-  // int *h_grid_start_idx = new int[num_cells];
-  // cudaMemcpy(h_grid_start_idx, d_grid_start_idx, num_cells * sizeof(int), cudaMemcpyDeviceToHost);
-  // log("cell start index");
-  // for (int i = 0; i < num_cells; ++i) {
-  //   if (i == 0 || h_grid_start_idx[i] != h_grid_start_idx[i-1] )
-  //     printf("%d %d\n", i, h_grid_start_idx[i]);
-  // }
-  // delete [] h_grid_start_idx;
-
-  // int h_sorted_particle_idx[num_particles];
-  // cudaMemcpy(h_sorted_particle_idx, d_sorted_particle_idx, num_particles * sizeof(int), cudaMemcpyDeviceToHost);
-  // for (int i = 0; i < num_particles; ++i) {
-  //   printf("%6d ", h_cell_idx[h_sorted_particle_idx[i]]);
-  // }
-  // log();
 }
 
-__global__ void _debug_count_neighbors(int* d_out, int size) {
-  int count = 0;
+namespace mc {
+__constant__ glm::vec3 mc_corner;
+glm::vec3 h_mc_corner;
+
+__constant__ glm::vec3 mc_size;
+glm::vec3 h_mc_size;
+
+__constant__ glm::ivec3 grid_size;
+glm::ivec3 h_grid_size;
+__constant__ glm::ivec3 corner_size;
+glm::ivec3 h_corner_size;
+__constant__ float cell_size;
+float h_cell_size;
+
+__device__ int *grid_occupied;
+int* d_grid_occupied;
+__device__ float *corner_value;
+float* d_corner_value;
+
+__device__ glm::vec3 *faces;
+glm::vec3 *d_faces;
+__device__ int *num_faces;
+int *d_num_faces;
+__device__ int *grid_face_idx;  // used for stream compaction
+int *d_grid_face_idx;
+
+__device__ int get_corner_idx(glm::ivec3 v) {
+  return v.x * corner_size.y * corner_size.z + v.y * corner_size.z + v.z;
+}
+__device__ int get_cell_idx(glm::ivec3 v) {
+  return v.x * grid_size.y * grid_size.z + v.y * grid_size.z + v.z;
+}
+
+__global__ void _update_grid_corners(int n, float radius) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
-    FOR_NEIGHBORS(
-        count++;
-                  );
-    d_out[i] = count;
+
+  if (i < n) {
+    float r2 = radius * radius;
+    glm::vec3 relative_position = (positions[i] - mc_corner);
+    glm::vec3 start = relative_position - glm::vec3(radius);
+    glm::vec3 end = relative_position + glm::vec3(radius);
+
+    glm::ivec3 grid_start = glm::clamp(glm::ivec3(glm::ceil(start / cell_size)), glm::ivec3(0), corner_size);
+    glm::ivec3 grid_end = glm::clamp(glm::ivec3(glm::ceil(end / cell_size)), glm::ivec3(0), corner_size);
+
+    // TODO: look up table may be better
+    for (int x = grid_start.x; x < grid_end.x; ++x) {
+      for (int y = grid_start.y; y < grid_end.y; ++y) {
+        for (int z = grid_start.z; z < grid_end.z; ++z) {
+          glm::vec3 d = glm::vec3(x, y, z) * cell_size - relative_position;
+          float d2 = glm::dot(d, d);
+          if (d2 < r2) {
+            int corner_idx = get_corner_idx(glm::ivec3(x,y,z));
+
+            atomicAdd(&corner_value[corner_idx], kernel(sqrtf(d2) / params.particle_size));
+
+            // TODO: the following may not be needed
+            for (int x2 = -1; x2 <= 0; ++x2 ) {
+              for (int y2 = -1; y2 <= 0; ++y2) {
+                for (int z2 = -1; z2 <= 0; ++z2) {
+                  glm::ivec3 cell_pos = glm::ivec3(x+x2, y+y2, z+z2);
+                  if (cell_pos.x > 0 && cell_pos.x < grid_size.x &&
+                      cell_pos.y > 0 && cell_pos.y < grid_size.y &&
+                      cell_pos.z > 0 && cell_pos.z < grid_size.z) {
+                    int cell_idx = get_cell_idx(cell_pos);
+                    grid_occupied[cell_idx] = 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
-void debug_count_neighbors(int* h_out, int size) {
-  int* d_out;
-  cudaMalloc(&d_out, size * sizeof(int));
-  _debug_count_neighbors<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(d_out, size);
-  cudaMemcpy(h_out, d_out, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+__device__ glm::vec3 vertex_interp(float isolevel, glm::vec3 p0, glm::vec3 p1, float v0, float v1) {
+  return p0 + (isolevel - v0) / (v1 - v0) * (p1 - p0);
 }
 
-} // namespace sph
+__device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
+  int cube_idx = 0;
+  int idx = i;
+  int x = idx / (grid_size.y * grid_size.z);
+  idx %= grid_size.y * grid_size.z;
+  int y = idx / grid_size.z;
+  int z = idx % grid_size.z;
 
+  glm::vec3 vertlist[12];
+  float val[8];
+  val[0] = corner_value[get_corner_idx (glm::ivec3 (x,     y,     z     ) )];
+  val[1] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y,     z     ) )];
+  val[2] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y,     z + 1 ) )];
+  val[3] = corner_value[get_corner_idx (glm::ivec3 (x,     y,     z + 1 ) )];
+  val[4] = corner_value[get_corner_idx (glm::ivec3 (x,     y + 1, z     ) )];
+  val[5] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y + 1, z     ) )];
+  val[6] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y + 1, z + 1 ) )];
+  val[7] = corner_value[get_corner_idx (glm::ivec3 (x,     y + 1, z + 1 ) )];
+
+  glm::vec3 p[8];
+  p[0] = glm::vec3(x,   y,   z   ) * cell_size + mc_corner;
+  p[1] = glm::vec3(x+1, y,   z   ) * cell_size + mc_corner;
+  p[2] = glm::vec3(x+1, y,   z+1 ) * cell_size + mc_corner;
+  p[3] = glm::vec3(x,   y,   z+1 ) * cell_size + mc_corner;
+  p[4] = glm::vec3(x,   y+1, z   ) * cell_size + mc_corner;
+  p[5] = glm::vec3(x+1, y+1, z   ) * cell_size + mc_corner;
+  p[6] = glm::vec3(x+1, y+1, z+1 ) * cell_size + mc_corner;
+  p[7] = glm::vec3(x,   y+1, z+1 ) * cell_size + mc_corner;
+
+  if (val[0] < isolevel) cube_idx |= 1;
+  if (val[1] < isolevel) cube_idx |= 2;
+  if (val[2] < isolevel) cube_idx |= 4;
+  if (val[3] < isolevel) cube_idx |= 8;
+  if (val[4] < isolevel) cube_idx |= 16;
+  if (val[5] < isolevel) cube_idx |= 32;
+  if (val[6] < isolevel) cube_idx |= 64;
+  if (val[7] < isolevel) cube_idx |= 128;
+
+  if (edgeTable[cube_idx] == 0)
+    return 0;
+  if (edgeTable[cube_idx] & 1)
+    vertlist[0] = vertex_interp(isolevel,  p[0], p[1], val[0], val[1]);
+  if (edgeTable[cube_idx] & 2)
+    vertlist[1] = vertex_interp(isolevel,  p[1], p[2], val[1], val[2]);
+  if (edgeTable[cube_idx] & 4)
+    vertlist[2] = vertex_interp(isolevel,  p[2], p[3], val[2], val[3]);
+  if (edgeTable[cube_idx] & 8)
+    vertlist[3] = vertex_interp(isolevel,  p[3], p[0], val[3], val[0]);
+  if (edgeTable[cube_idx] & 16)
+    vertlist[4] = vertex_interp(isolevel,  p[4], p[5], val[4], val[5]);
+  if (edgeTable[cube_idx] & 32)
+    vertlist[5] = vertex_interp(isolevel,  p[5], p[6], val[5], val[6]);
+  if (edgeTable[cube_idx] & 64)
+    vertlist[6] = vertex_interp(isolevel,  p[6], p[7], val[6], val[7]);
+  if (edgeTable[cube_idx] & 128)
+    vertlist[7] = vertex_interp(isolevel,  p[7], p[4], val[7], val[4]);
+  if (edgeTable[cube_idx] & 256)
+    vertlist[8] = vertex_interp(isolevel,  p[0], p[4], val[0], val[4]);
+  if (edgeTable[cube_idx] & 512)
+    vertlist[9] = vertex_interp(isolevel,  p[1], p[5], val[1], val[5]);
+  if (edgeTable[cube_idx] & 1024)
+    vertlist[10] = vertex_interp(isolevel, p[2], p[6], val[2], val[6]);
+  if (edgeTable[cube_idx] & 2048)
+    vertlist[11] = vertex_interp(isolevel, p[3], p[7], val[3], val[7]);
+
+  int vi;
+  for (vi = 0; triTable[cube_idx][vi] != -1; vi += 1) {
+    triangles[vi] = vertlist[triTable[cube_idx][vi]];
+  }
+  return vi / 3;
+}
+
+__global__ void _update_faces(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    num_faces[i] = generate_face(i, 0.2f, &faces[15 * i]);
+  }
+}
+
+__device__ int total_num_faces;
+__global__ void _transfer_faces_to_vbo(int n, float* vbo) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    int j = 0;
+    for (int t = 0; t < num_faces[i]; ++t) {
+      glm::vec3 v1 = faces[15 * i + 3 * t    ];
+      glm::vec3 v2 = faces[15 * i + 3 * t + 1];
+      glm::vec3 v3 = faces[15 * i + 3 * t + 2];
+      glm::vec3 normal = -glm::normalize(glm::cross(v2-v1, v3-v1));
+
+      // vertex
+      vbo[18 * grid_face_idx[i] + j++] = v1.x;
+      vbo[18 * grid_face_idx[i] + j++] = v1.y;
+      vbo[18 * grid_face_idx[i] + j++] = v1.z;
+
+      // normal
+      vbo[18 * grid_face_idx[i] + j++] = normal.x;
+      vbo[18 * grid_face_idx[i] + j++] = normal.y;
+      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+
+      // vertex
+      vbo[18 * grid_face_idx[i] + j++] = v2.x;
+      vbo[18 * grid_face_idx[i] + j++] = v2.y;
+      vbo[18 * grid_face_idx[i] + j++] = v2.z;
+
+      // normal
+      vbo[18 * grid_face_idx[i] + j++] = normal.x;
+      vbo[18 * grid_face_idx[i] + j++] = normal.y;
+      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+
+      // vertex
+      vbo[18 * grid_face_idx[i] + j++] = v3.x;
+      vbo[18 * grid_face_idx[i] + j++] = v3.y;
+      vbo[18 * grid_face_idx[i] + j++] = v3.z;
+
+      // normal
+      vbo[18 * grid_face_idx[i] + j++] = normal.x;
+      vbo[18 * grid_face_idx[i] + j++] = normal.y;
+      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+    }
+  }
+  if (i == n - 1) {
+    total_num_faces = grid_face_idx[i] + num_faces[i];
+  }
+}
+
+void update_faces(float* vbo, int* h_total_num_faces) {
+  int total_num_cells = h_grid_size.x * h_grid_size.y * h_grid_size.z;
+  _update_faces<<<(total_num_cells + N_THREADS - 1) / N_THREADS, N_THREADS>>>(total_num_cells);
+
+  // stream compaction
+  thrust::device_ptr<int> num_faces_ptr = thrust::device_pointer_cast(d_num_faces);
+  thrust::device_ptr<int> grid_face_idx_ptr = thrust::device_pointer_cast(d_grid_face_idx);
+  thrust::exclusive_scan(num_faces_ptr, num_faces_ptr + total_num_cells, grid_face_idx_ptr);
+
+  _transfer_faces_to_vbo<<<(total_num_cells + N_THREADS - 1) / N_THREADS, N_THREADS>>>(total_num_cells, vbo);
+  CUDA_CHECK_RETURN(cudaMemcpyFromSymbol(h_total_num_faces, mc::total_num_faces, sizeof(int)));
+}
+
+void update_grid_corners() {
+  cudaMemset(d_grid_occupied, 0, h_grid_size.x * h_grid_size.y * h_grid_size.z * sizeof(int));
+  cudaMemset(d_corner_value, 0, h_corner_size.x * h_corner_size.y * h_corner_size.z * sizeof(float));
+  _update_grid_corners<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles, h_params.cell_size);
+}
+
+
+void init(float cell_size) {
+  h_cell_size = cell_size;
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::cell_size, &h_cell_size, sizeof(float)));
+
+  h_mc_corner = h_domain.corner - 4 * cell_size;
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::mc_corner, &h_mc_corner, sizeof(glm::vec3)));
+  h_mc_size = h_domain.size + 8 * cell_size;
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::mc_size, &h_mc_size, sizeof(glm::vec3)))
+
+  h_grid_size = glm::ivec3(h_mc_size / cell_size) + glm::ivec3(1, 1, 1);
+
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::grid_size, &h_grid_size, sizeof(glm::ivec3)));
+
+  h_corner_size = h_grid_size + glm::ivec3(1, 1, 1);
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::corner_size, &h_corner_size, sizeof(glm::ivec3)));
+
+  // mc grid for corners and cells
+  int total_grid_size = h_grid_size.x * h_grid_size.y * h_grid_size.z;
+  CUDA_CHECK_RETURN(cudaMalloc(&d_grid_occupied, total_grid_size * sizeof(int)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::grid_occupied, &d_grid_occupied, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_corner_value, h_corner_size.x * h_corner_size.y * h_corner_size.z * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::corner_value, &d_corner_value, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  // initialize face storage
+  CUDA_CHECK_RETURN(cudaMalloc(&d_faces, total_grid_size * 15 * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::faces, &d_faces, sizeof(void *), 0, cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_num_faces, total_grid_size * sizeof(int)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::num_faces, &d_num_faces, sizeof(void *), 0, cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_grid_face_idx, total_grid_size * sizeof(int)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::grid_face_idx, &d_grid_face_idx, sizeof(void *), 0, cudaMemcpyHostToDevice));
+}
+
+/*
+ * idx: idx in grid_array
+ * Return: center of grid
+ */
+glm::vec3 get_grid_center(int idx) {
+  int x = idx / (h_grid_size.y * h_grid_size.z);
+  idx %= h_grid_size.y * h_grid_size.z;
+  int y = idx / h_grid_size.z;
+  int z = idx % h_grid_size.z;
+  return h_mc_corner + mc::h_cell_size * glm::vec3(x,y,z) + mc::h_cell_size / 2;
+}
+
+void print_summary() {
+  log("Marching Cube");
+  log("Grid size", h_grid_size);
+  log("Corner size", h_corner_size);
+}
+
+int get_num_cells() {
+  return h_grid_size.x * h_grid_size.y * h_grid_size.z;
+}
+
+} // namespace mc
+} // namespace sph

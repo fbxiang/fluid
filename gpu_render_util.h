@@ -4,12 +4,27 @@
 #include "render/scene.h"
 #include <glm/gtx/compatibility.hpp>
 #include <iostream>
+#include "sph.cuh"
+#include <cuda_gl_interop.h>
+
+#define N_THREADS 1024
+#define CUDA_CHECK_RETURN(value)                                               \
+  {                                                                            \
+    cudaError_t _m_cudaStat = value;                                           \
+    if (_m_cudaStat != cudaSuccess) {                                          \
+      fprintf(stderr, "Error %s at line %d in file %s\n",                      \
+              cudaGetErrorString(_m_cudaStat), __LINE__, __FILE__);            \
+      exit(EXIT_FAILURE);                                                      \
+    }                                                                          \
+  }
 
 class GPURenderUtil {
 public:
   std::shared_ptr<Scene> scene;
   std::shared_ptr<Object> domain;
   std::vector<std::shared_ptr<Object>> particles;
+  std::shared_ptr<Object> fluidObj;
+  cudaGraphicsResource_t resource = 0;
 
   Renderer *renderer;
   SPH_GPU *fluid_system;
@@ -34,6 +49,24 @@ public:
     lineCube->position = system->fluid_domain.corner + system->fluid_domain.size / 2.f;
     lineCube->scale = system->fluid_domain.size / 2.f;
 
+    int mc_num_cells = system->get_mc_num_cells();
+
+    // TODO: maybe optimize using EBO?
+    // each cell can have 5 faces (15 vertices)
+    std::shared_ptr<DynamicMesh> mesh = std::make_shared<DynamicMesh>(mc_num_cells * 15);
+    CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(&resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
+
+    fluidObj = NewObject<Object>(mesh);
+    fluidObj->name = "Fluid";
+    scene->addObject(fluidObj);
+
+    size_t free, used;
+    cudaMemGetInfo(&free, &used);
+    printf("free: %ld; used: %ld\n", free, used);
+
+
+    fluidObj->material.kd = {1, 0, 0};
+
     scene->addDirectionalLight({glm::vec3(0, -1, -1), glm::vec3(1, 1, 0.5)});
     renderer = new Renderer(width, height);
     renderer->init();
@@ -45,36 +78,27 @@ public:
   void render() {
     update_particles();
     renderer->renderScene(scene);
+
+    float *d_vertex_pointer;
+    size_t size;
+    CUDA_CHECK_RETURN(cudaGraphicsMapResources(1, &resource));
+    CUDA_CHECK_RETURN(cudaGraphicsResourceGetMappedPointer((void**)&d_vertex_pointer, &size, resource));
+    int num_faces = 0;
+    fluid_system->update_mesh();
+    fluid_system->update_faces(d_vertex_pointer, &num_faces);
+    printf("Num faces: %d\n", num_faces);
+    std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())->setVertexCount(num_faces * 3);
+    CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
   }
 
   void renderToFile(uint32_t i = 0) {
     renderer->renderSceneToFile(scene, "/tmp/sph_" + std::to_string(i) + ".png");
   }
 
-  void add_particles() {
-    std::vector<glm::vec3> positions = fluid_system->get_particles();
-    particles.resize(positions.size());
-    for (uint32_t i = 0; i < particles.size(); ++i) {
-      particles[i] = NewSphere();
-      particles[i]->position = positions[i];
-      scene->addObject(particles[i]);
-      float scale = fluid_system->solver_params.particle_size / 2.f;
-      particles[i]->scale = {scale, scale, scale};
-      particles[i]->material.kd = glm::vec3(0, 0.5, 0.75);
-    }
-  }
-
   void update_particles() {
     std::vector<glm::vec3> positions = fluid_system->get_particles();
     for (uint32_t i = 0; i < particles.size(); ++i) {
       particles[i]->position = positions[i];
-      // glm::uvec3 size = fluid_system->grid_size();
-      // float ratio = fluid_system->rhos[i] / fluid_system->solver.rest_density;
-
-      // float l = glm::clamp((ratio - 1.f) / 3.f, 0.f, 1.f);
-      // auto color = glm::lerp(glm::vec3(0, 0.5, 0.75), glm::vec3(1, 0, 0), l);
-
-      // particles[i]->material.kd = color;
     }
   }
 };

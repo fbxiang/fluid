@@ -79,9 +79,9 @@ std::vector<glm::vec3> fill_block(glm::vec3 corner, glm::vec3 size,
                                   float step) {
   std::vector<glm::vec3> positions;
   glm::ivec3 n = size / step;
-  for (uint32_t i = 0; i < n.x; ++i) {
-    for (uint32_t j = 0; j < n.y; ++j) {
-      for (uint32_t k = 0; k < n.z; ++k) {
+  for (int i = 0; i < n.x; ++i) {
+    for (int j = 0; j < n.y; ++j) {
+      for (int k = 0; k < n.z; ++k) {
         glm::vec3 jitter = {rand_float(-step / 4.f, step / 4.f),
                             rand_float(-step / 4.f, step / 4.f),
                             rand_float(-step / 4.f, step / 4.f)};
@@ -93,10 +93,11 @@ std::vector<glm::vec3> fill_block(glm::vec3 corner, glm::vec3 size,
 }
 
 int main() {
-  float h = 0.013;
+  float h = 0.015;
   SPH_GPU fs(h);
   fs.set_domain({0, 0, 0}, {0.5, 1.0, 0.5});
   fs.cuda_init();
+  fs.marching_cube_init();
   std::vector<glm::vec3> positions = fill_block({0.1, 0.1, 0.1}, {0.3, 0.3, 0.3}, h);
   fs.add_particles(positions);
   sph::print_summary();
@@ -106,7 +107,6 @@ int main() {
 
   GPURenderUtil ru(&fs, W, H);
   ru.renderer->debug = 0;
-  ru.add_particles();
 
   int frame = 0;
   int iter = 0;
@@ -121,8 +121,8 @@ int main() {
 
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
-    if (width != ru.renderer->getWidth() ||
-        height != ru.renderer->getHeight()) {
+    if (width != (int)ru.renderer->getWidth() ||
+        height != (int)ru.renderer->getHeight()) {
       cout << "Resizing to " << width << " " << height << endl;
       ru.renderer->resize(width, height);
       ru.scene->getMainCamera()->aspect = width / (float)height;
@@ -135,16 +135,23 @@ int main() {
     updateScene(ru.scene, dt);
     time = newTime;
 
+    // ru.render_debug();
+    profiler::start("render");
     ru.render();
-    // ru.render_grid();
+    profiler::stop("render");
     glfwSwapBuffers(window);
 
     float time = 0;
+    profiler::start("simulate");
     while (time < 1.f / 60.f) {
       float dt = fs.step_regular();
+      fs.update_mesh();
       // printf("Time step: %f\n", dt);
       time += dt;
     }
+    profiler::stop("simulate");
+
+    profiler::show();
   }
   return 0;
 }

@@ -18,7 +18,32 @@ struct Vertex {
 };
 
 
-class MeshBase : public std::enable_shared_from_this<MeshBase> {
+class AbstractMeshBase : public std::enable_shared_from_this<AbstractMeshBase> {
+ public:
+  virtual void draw() const = 0;
+};
+
+class DynamicMesh : public AbstractMeshBase {
+  GLuint vao;
+  GLuint vbo;
+  int vertexCount;
+  int maxVertexCount;
+
+ public:
+  DynamicMesh(int maxvcount);
+  DynamicMesh(const DynamicMesh &) = delete;
+  DynamicMesh &operator=(const DynamicMesh &) = delete;
+  virtual ~DynamicMesh();
+
+  inline GLuint getVAO() const { return vao; }
+  inline GLuint getVBO() const { return vbo; }
+
+  void setVertexCount(int vcount);
+  virtual void draw() const override;
+};
+
+
+class MeshBase : public AbstractMeshBase {
 protected:
   GLuint vao;
   GLuint vbo;
@@ -41,8 +66,6 @@ protected:
   GLuint getEBO() const;
   const std::vector<Vertex> &getVertices() const;
   const std::vector<GLuint> &getIndices() const;
-
-  virtual void draw() const = 0;
 };
 
 class TriangleMesh : public MeshBase {

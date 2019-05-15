@@ -1,15 +1,15 @@
 #pragma once
-#include <string>
-#include <memory>
-#include <vector>
 #include "shader.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 
 #include "mesh.h"
-#include "texture.h"
 #include "noise/perlin.h"
+#include "texture.h"
 
 class Scene;
 
@@ -27,13 +27,12 @@ struct Material {
   float exp = 1.f;
 };
 
+class Object : public std::enable_shared_from_this<Object> {
+protected:
+  std::shared_ptr<AbstractMeshBase> mesh;
 
-class Object: public std::enable_shared_from_this<Object> {
- protected:
-  std::shared_ptr<MeshBase> mesh;
-
- public:
-  Shader* shader;
+public:
+  Shader *shader;
   Material material;
   std::string name;
   glm::vec3 position;
@@ -41,45 +40,39 @@ class Object: public std::enable_shared_from_this<Object> {
   glm::quat rotation;
   bool visible;
 
- protected:
+protected:
   std::weak_ptr<Scene> scene;
 
- public:
-  Object(std::shared_ptr<MeshBase> m = nullptr)
-      : shader(nullptr)
-      , mesh(m)
-      , name("")
-      , position(0.f)
-      , scale(1.f)
-      , rotation()
-      , visible(true) {}
+public:
+  Object(std::shared_ptr<AbstractMeshBase> m = nullptr)
+      : mesh(m), shader(nullptr), name(""), position(0.f), scale(1.f),
+        rotation(), visible(true) {}
 
   virtual ~Object() {}
 
   glm::mat4 getModelMat() const;
-  void setScene(const std::shared_ptr<Scene> inScene); 
+  void setScene(const std::shared_ptr<Scene> inScene);
   std::shared_ptr<Scene> getScene() const;
 
-  std::shared_ptr<MeshBase> getMesh() const;
+  std::shared_ptr<AbstractMeshBase> getMesh() const;
 };
 
-
-template<typename T>
-std::shared_ptr<T> NewObject(std::shared_ptr<MeshBase> mesh) {
-  static_assert(std::is_base_of<Object, T>::value, "T must inherit from Obejct.");
+template <typename T>
+std::shared_ptr<T> NewObject(std::shared_ptr<AbstractMeshBase> mesh) {
+  static_assert(std::is_base_of<Object, T>::value,
+                "T must inherit from Obejct.");
   auto obj = std::make_shared<T>(mesh);
   return obj;
 }
 
-template<typename T>
-std::shared_ptr<T> NewObject() {
-  static_assert(std::is_base_of<Object, T>::value, "T must inherit from Obejct.");
+template <typename T> std::shared_ptr<T> NewObject() {
+  static_assert(std::is_base_of<Object, T>::value,
+                "T must inherit from Obejct.");
   auto obj = std::make_shared<T>();
   return obj;
 }
 
-
-std::shared_ptr<Object> NewNoisePlane(unsigned int res); 
+std::shared_ptr<Object> NewNoisePlane(unsigned int res);
 std::shared_ptr<Object> NewDebugObject();
 std::shared_ptr<Object> NewPlane();
 std::shared_ptr<Object> NewCube();

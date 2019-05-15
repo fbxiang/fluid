@@ -17,7 +17,7 @@ public:
     solver_params.rest_density = 1000.f;
     solver_params.k = 7.f;
     solver_params.gamma = 7.f;
-    solver_params.viscosity = 0.001f;
+    solver_params.viscosity = 0.0001f;
     solver_params.particle_size = size;
     solver_params.cell_size = 2 * size;
     solver_params.time_step = 0.001f;  // not used
@@ -32,6 +32,10 @@ public:
 
   void cuda_init() {
     sph::init(solver_params, fluid_domain, 1000000);
+  }
+
+  void marching_cube_init() {
+    sph::mc::init(solver_params.particle_size * .5f);
   }
 
   void add_particles(std::vector<glm::vec3>& positions) {
@@ -52,9 +56,17 @@ public:
   float step_regular() {
     return sph::step_regular();
   }
-  /* initialization stage */
-  // void sim_init();
 
-  /* loop stage */
-  // void step();
+  // Code for marching cube
+  int get_mc_num_cells() {
+    return sph::mc::get_num_cells();
+  }
+
+  void update_mesh() {
+    sph::mc::update_grid_corners();
+  }
+
+  void update_faces(float *vbo, int* num_faces) {
+    sph::mc::update_faces(vbo, num_faces);
+  }
 };

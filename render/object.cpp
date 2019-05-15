@@ -20,7 +20,7 @@ std::shared_ptr<Scene> Object::getScene() const {
   return std::shared_ptr<Scene>();
 }
 
-std::shared_ptr<MeshBase> Object::getMesh() const { return mesh; }
+std::shared_ptr<AbstractMeshBase> Object::getMesh() const { return mesh; }
 
 std::shared_ptr<Object> NewNoisePlane(unsigned int res) {
 

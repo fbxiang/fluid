@@ -48,7 +48,6 @@ MeshBase::MeshBase(const std::vector<Vertex> &inVertices,
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint),
                &indices[0], GL_STATIC_DRAW);
-
 }
 
 GLuint MeshBase::getVAO() const { return vao; }
@@ -155,4 +154,39 @@ std::shared_ptr<TriangleMesh> NewCubeMesh() {
 void LineMesh::draw() const {
   glBindVertexArray(getVAO());
   glDrawElements(GL_LINES, getIndices().size(), GL_UNSIGNED_INT, 0);
+}
+
+DynamicMesh::DynamicMesh(int maxvcount)
+    : vertexCount(0), maxVertexCount(maxvcount) {
+
+  glGenVertexArrays(1, &vao);
+  glBindVertexArray(vao);
+  glGenBuffers(1, &vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+  glBufferData(GL_ARRAY_BUFFER, maxVertexCount * 6 * sizeof(float), NULL,
+               GL_DYNAMIC_DRAW);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
+
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+DynamicMesh::~DynamicMesh() {
+  if (vbo)
+    glDeleteBuffers(1, &vbo);
+  if (vao)
+    glDeleteVertexArrays(1, &vao);
+}
+
+void DynamicMesh::draw() const {
+  glBindVertexArray(getVAO());
+  glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+}
+
+void DynamicMesh::setVertexCount(int vcount) {
+  vertexCount = std::max(std::min(vcount, maxVertexCount) / 3 * 3, 0);
 }
