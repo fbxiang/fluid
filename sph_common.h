@@ -10,7 +10,6 @@ struct SolverParams {
 
   float viscosity;     // = 0.f;
   float particle_mass; // h * h * h * rest_density
-  float time_step;     // = 0.001f;
 
   float particle_size; // h
   float cell_size;     // 2 * h

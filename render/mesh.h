@@ -39,6 +39,8 @@ class DynamicMesh : public AbstractMeshBase {
   inline GLuint getVBO() const { return vbo; }
 
   void setVertexCount(int vcount);
+  int getVertexCount() const;
+  int getMaxVertexCount() const;
   virtual void draw() const override;
 };
 

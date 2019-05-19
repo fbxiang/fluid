@@ -190,3 +190,11 @@ void DynamicMesh::draw() const {
 void DynamicMesh::setVertexCount(int vcount) {
   vertexCount = std::max(std::min(vcount, maxVertexCount) / 3 * 3, 0);
 }
+
+int DynamicMesh::getVertexCount() const {
+  return vertexCount;
+}
+
+int DynamicMesh::getMaxVertexCount() const {
+  return maxVertexCount;
+}

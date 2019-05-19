@@ -1,6 +1,7 @@
 #include "sph_gpu.h"
 #include "render/input.h"
 #include "gpu_render_util.h"
+#include "raytrace_util.h"
 #include "utils.h"
 #include <iostream>
 #include "profiler.h"
@@ -10,11 +11,17 @@ using std::endl;
 
 GLFWwindow *window;
 
+bool needs_camera_update = false;
+bool paused = false;
+
 Input input;
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,
                  int mods) {
   if (key == GLFW_KEY_Q) {
     glfwSetWindowShouldClose(window, 1);
+  }
+  if (action == GLFW_PRESS && key == GLFW_KEY_P) {
+    paused = !paused;
   }
   input.keyCallback(key, scancode, action, mods);
 }
@@ -28,18 +35,22 @@ bool updateScene(std::shared_ptr<Scene> scene, double dt) {
 
   if (input.getKeyState(GLFW_KEY_W)) {
     scene->getMainCamera()->move(0, 0, 2 * dt);
+    needs_camera_update = true;
     rt = true;
   } else if (input.getKeyState(GLFW_KEY_S)) {
     scene->getMainCamera()->move(0, 0, -dt);
+    needs_camera_update = true;
     rt = true;
   }
   if (input.getKeyState(GLFW_KEY_A)) {
     scene->getMainCamera()->move(0, -dt, 0);
+    needs_camera_update = true;
     rt = true;
   } else if (input.getKeyState(GLFW_KEY_D)) {
     scene->getMainCamera()->move(0, dt, 0);
+    needs_camera_update = true;
     rt = true;
-  }
+  } 
 
   if (input.getMouseButton(GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
     double dx, dy;
@@ -48,6 +59,7 @@ bool updateScene(std::shared_ptr<Scene> scene, double dt) {
     scene->getMainCamera()->rotatePitch(-dy / 1000.f);
     if (abs(dx) > 0.1 || abs(dy) > 0.1)
       rt = true;
+    needs_camera_update = true;
   }
 
   return rt;
@@ -94,19 +106,29 @@ std::vector<glm::vec3> fill_block(glm::vec3 corner, glm::vec3 size,
 
 int main() {
   float h = 0.015;
-  SPH_GPU fs(h);
+  SPH_GPU_PCI fs(h);
+
   fs.set_domain({0, 0, 0}, {0.5, 1.0, 0.5});
   fs.cuda_init();
   fs.marching_cube_init();
-  std::vector<glm::vec3> positions = fill_block({0.1, 0.1, 0.1}, {0.3, 0.3, 0.3}, h);
+  std::vector<glm::vec3> positions = fill_block({0.1, 0.1, 0.1}, {0.3, 0.1, 0.3}, h);
+  fs.add_particles(positions);
+
+  positions = fill_block({0.1, 0.3, 0.1}, {0.3, 0.1, 0.3}, h);
+  fs.add_particles(positions);
+
+  positions = fill_block({0.1, 0.5, 0.1}, {0.3, 0.1, 0.3}, h);
   fs.add_particles(positions);
   sph::print_summary();
 
   uint32_t W = 1200, H = 900;
   init(W, H);
 
-  GPURenderUtil ru(&fs, W, H);
-  ru.renderer->debug = 0;
+  // GPURenderUtil ru(&fs, W, H);
+  RaytraceUtil ru(&fs, W, H);
+  // ru.renderer->debug = 0;
+
+  fs.sim_init();
 
   int frame = 0;
   int iter = 0;
@@ -118,6 +140,11 @@ int main() {
     input.cursorPosCallback(xpos, ypos);
     input.mouseCallback(GLFW_MOUSE_BUTTON_RIGHT,
                         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT));
+
+    if (needs_camera_update) {
+      needs_camera_update = false;
+      ru.invalidate_camera();
+    }
 
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
@@ -138,20 +165,31 @@ int main() {
     // ru.render_debug();
     profiler::start("render");
     ru.render();
+    if (!paused) {
+      ru.invalidate_camera();
+    }
+
     profiler::stop("render");
     glfwSwapBuffers(window);
 
     float time = 0;
+
+    if (paused) {
+      // skip physics
+      continue;
+    }
+
     profiler::start("simulate");
+    // physics
     while (time < 1.f / 60.f) {
-      float dt = fs.step_regular();
+      float dt = fs.step();
       fs.update_mesh();
       // printf("Time step: %f\n", dt);
       time += dt;
     }
     profiler::stop("simulate");
 
-    profiler::show();
+    // profiler::show();
   }
   return 0;
 }

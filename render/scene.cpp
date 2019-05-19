@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "texture.h"
 #include <algorithm>
 
 bool Scene::contains(const std::shared_ptr<Object> obj) const {
@@ -52,3 +53,7 @@ const std::vector<std::shared_ptr<Object>>& Scene::getObjects() const {
 void Scene::addPointLight(PointLight light) { pointLights.push_back(light); }
 void Scene::addDirectionalLight(DirectionalLight light) { directionalLights.push_back(light); }
 void Scene::addParalleloGramLight(ParallelogramLight light) { parallelogramLights.push_back(light); }
+
+void Scene::setEnvironmentMap(const std::string &front, const std::string &back, const std::string &top, const std::string &bottom, const std::string &left, const std::string &right, int wrapping, int filtering) {
+  environmentMap = LoadCubeMapTexture(front, back, top, bottom, left, right, wrapping, filtering);
+}

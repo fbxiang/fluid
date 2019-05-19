@@ -79,3 +79,4 @@ std::shared_ptr<Object> NewCube();
 std::shared_ptr<Object> NewSphere();
 std::shared_ptr<Object> NewLine();
 std::shared_ptr<Object> NewLineCube();
+std::shared_ptr<Object> NewEnvironmentCube();

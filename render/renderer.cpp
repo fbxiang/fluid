@@ -8,6 +8,9 @@ void Renderer::init() {
                              "/home/fx/glsl-files/gbuffer.fsh");
   deferredShader = new Shader("/home/fx/glsl-files/deferred.vsh",
                               "/home/fx/glsl-files/deferred.fsh");
+  skyboxShader = new Shader("/home/fx/glsl-files/skybox.vsh",
+                            "/home/fx/glsl-files/skybox.fsh");
+
   glEnable(GL_FRAMEBUFFER_SRGB_EXT);
   initGbufferFramebuffer();
   initColortex();
@@ -27,36 +30,40 @@ void Renderer::exit() {
   deleteDepthtex();
   deleteColortex();
   deleteGbufferFramebuffer();
-  delete gbufferShader; gbufferShader = nullptr;
-  delete deferredShader; deferredShader = nullptr;
+  delete gbufferShader;
+  gbufferShader = nullptr;
+  delete deferredShader;
+  deferredShader = nullptr;
+  delete skyboxShader;
+  skyboxShader = nullptr;
 }
 
 void Renderer::resize(GLuint w, GLuint h) {
   exit();
-  width = w; height = h;
+  width = w;
+  height = h;
   init();
 }
 
 void Renderer::reloadShaders() {
   delete gbufferShader;
   delete deferredShader;
-  gbufferShader = new Shader("/home/fx/glsl-files/gbuffer.vsh", "/home/fx/glsl-files/gbuffer.fsh");
-  deferredShader = new Shader("/home/fx/glsl-files/deferred.vsh", "/home/fx/glsl-files/deferred.fsh");
+  gbufferShader = new Shader("/home/fx/glsl-files/gbuffer.vsh",
+                             "/home/fx/glsl-files/gbuffer.fsh");
+  deferredShader = new Shader("/home/fx/glsl-files/deferred.vsh",
+                              "/home/fx/glsl-files/deferred.fsh");
 }
 
-void Renderer::initGbufferFramebuffer() {
-  glGenFramebuffers(1, &g_fbo);
-}
+void Renderer::initGbufferFramebuffer() { glGenFramebuffers(1, &g_fbo); }
 
-void Renderer::deleteGbufferFramebuffer() {
-  glDeleteFramebuffers(1, &g_fbo);
-}
+void Renderer::deleteGbufferFramebuffer() { glDeleteFramebuffers(1, &g_fbo); }
 
 void Renderer::initColortex() {
   for (int n = 0; n < N_COLOR_ATTACHMENTS; n++) {
     glGenTextures(1, &colortex[n]);
     glBindTexture(GL_TEXTURE_2D, colortex[n]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA,
+                 GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   }
@@ -74,24 +81,25 @@ void Renderer::initDepthtex() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32, width, height, 0,
+               GL_DEPTH_COMPONENT, GL_FLOAT, 0);
 }
 
-void Renderer::deleteDepthtex() {
-  glDeleteTextures(1, &depthtex);
-}
+void Renderer::deleteDepthtex() { glDeleteTextures(1, &depthtex); }
 
 void Renderer::bindAttachments() {
   glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
   GLuint attachments[N_COLOR_ATTACHMENTS];
   for (int n = 0; n < N_COLOR_ATTACHMENTS; n++) {
     glBindTexture(GL_TEXTURE_2D, colortex[n]);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + n, GL_TEXTURE_2D, colortex[n], 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + n,
+                           GL_TEXTURE_2D, colortex[n], 0);
     attachments[n] = GL_COLOR_ATTACHMENT0 + n;
   }
   glBindTexture(GL_TEXTURE_2D, depthtex);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthtex, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                         depthtex, 0);
 
   glDrawBuffers(N_COLOR_ATTACHMENTS, attachments);
 }
@@ -100,18 +108,18 @@ void Renderer::initCompositeFramebuffer() {
   glGenFramebuffers(1, &composite_fbo);
 }
 
-void Renderer::deleteCompositeTex() {
-  glDeleteTextures(1, &compositeTex);
-}
+void Renderer::deleteCompositeTex() { glDeleteTextures(1, &compositeTex); }
 
 void Renderer::initCompositeTex() {
   glGenTextures(1, &compositeTex);
   glBindFramebuffer(GL_FRAMEBUFFER, composite_fbo);
   glBindTexture(GL_TEXTURE_2D, compositeTex);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA,
+               GL_FLOAT, NULL);
 
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, compositeTex, 0);
-  GLuint attachments[] { GL_COLOR_ATTACHMENT0 };
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         compositeTex, 0);
+  GLuint attachments[]{GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
 }
 
@@ -127,9 +135,9 @@ void Renderer::initDeferredQuad() {
   glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
 
   glEnableVertexAttribArray(0);
-  static float vertices[] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+  static float vertices[] = {0, 0, 1, 0, 1, 1, 0, 1};
   glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), &vertices[0], GL_STATIC_DRAW);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
 }
 
 void Renderer::deleteDeferredQuad() {
@@ -142,22 +150,38 @@ void Renderer::gbufferPass(std::shared_ptr<Scene> scene) {
 }
 
 void Renderer::gbufferPass(std::shared_ptr<Scene> scene, GLuint fbo) {
+  static const auto envCube = NewEnvironmentCube();
+
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glEnable(GL_DEPTH_TEST);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-  gbufferShader->use();
   glm::mat4 viewMat = scene->getMainCamera()->getViewMat();
   glm::mat4 projMat = scene->getMainCamera()->getProjectionMat();
 
+  // TODO: debug environment map
+  if (auto envmap = scene->getEnvironmentMap()) {
+    glDepthMask(GL_FALSE);
+    skyboxShader->use();
+    skyboxShader->setMatrix("gbufferViewMatrix", viewMat);
+    skyboxShader->setMatrix("gbufferProjectionMatrix", projMat);
+    skyboxShader->setTexture("skybox", envmap->getId(), 0);
+    envCube->getMesh()->draw();
+    glDepthMask(GL_TRUE);
+  }
+
+  gbufferShader->use();
   gbufferShader->setMatrix("gbufferViewMatrix", viewMat);
   gbufferShader->setMatrix("gbufferViewMatrixInverse", glm::inverse(viewMat));
   gbufferShader->setMatrix("gbufferProjectionMatrix", projMat);
-  gbufferShader->setMatrix("gbufferProjectionMatrixInverse", glm::inverse(projMat));
+  gbufferShader->setMatrix("gbufferProjectionMatrixInverse",
+                           glm::inverse(projMat));
 
-  for (const auto& obj : scene->getObjects()) {
+  for (const auto &obj : scene->getObjects()) {
     auto mesh = obj->getMesh();
-    if (!mesh) {continue;}
+    if (!mesh) {
+      continue;
+    }
 
     auto shader = obj->shader;
     if (shader) {
@@ -165,7 +189,8 @@ void Renderer::gbufferPass(std::shared_ptr<Scene> scene, GLuint fbo) {
       shader->setMatrix("gbufferViewMatrix", viewMat);
       shader->setMatrix("gbufferViewMatrixInverse", glm::inverse(viewMat));
       shader->setMatrix("gbufferProjectionMatrix", projMat);
-      shader->setMatrix("gbufferProjectionMatrixInverse", glm::inverse(projMat));
+      shader->setMatrix("gbufferProjectionMatrixInverse",
+                        glm::inverse(projMat));
     } else {
       shader = gbufferShader;
       shader->use();
@@ -180,17 +205,18 @@ void Renderer::gbufferPass(std::shared_ptr<Scene> scene, GLuint fbo) {
     shader->setBool("material.has_kd_map", obj->material.kd_map->getId() != 0);
     shader->setTexture("material.ks_map", obj->material.ks_map->getId(), 1);
     shader->setBool("material.has_ks_map", obj->material.ks_map->getId() != 0);
-    shader->setTexture("material.height_map", obj->material.height_map->getId(), 2);
-    shader->setBool("material.has_height_map", obj->material.height_map->getId() != 0);
-    shader->setTexture("material.normal_map", obj->material.normal_map->getId(), 3);
-    shader->setBool("material.has_normal_map", obj->material.normal_map->getId() != 0);
+    shader->setTexture("material.height_map", obj->material.height_map->getId(),
+                       2);
+    shader->setBool("material.has_height_map",
+                    obj->material.height_map->getId() != 0);
+    shader->setTexture("material.normal_map", obj->material.normal_map->getId(),
+                       3);
+    shader->setBool("material.has_normal_map",
+                    obj->material.normal_map->getId() != 0);
 
     mesh->draw();
-    // glBindVertexArray(mesh->getVAO());
-    // glDrawElements(GL_TRIANGLES, mesh->getIndices().size(), GL_UNSIGNED_INT, 0);
   }
 }
-
 
 void Renderer::deferredPass(std::shared_ptr<Scene> scene) {
   deferredPass(scene, 0);
@@ -209,13 +235,14 @@ void Renderer::deferredPass(std::shared_ptr<Scene> scene, GLuint fbo) {
   deferredShader->setMatrix("gbufferViewMatrix", viewMat);
   deferredShader->setMatrix("gbufferViewMatrixInverse", glm::inverse(viewMat));
   deferredShader->setMatrix("gbufferProjectionMatrix", projMat);
-  deferredShader->setMatrix("gbufferProjectionMatrixInverse", glm::inverse(projMat));
+  deferredShader->setMatrix("gbufferProjectionMatrixInverse",
+                            glm::inverse(projMat));
   deferredShader->setVec3("cameraPosition", mainCam->position);
 
   // debug code
   deferredShader->setInt("debug", debug);
 
-  const auto& pointLights = scene->getPointLights();
+  const auto &pointLights = scene->getPointLights();
   for (int i = 0; i < pointLights.size(); i++) {
     std::string p = "pointLights[" + std::to_string(i) + "].position";
     std::string e = "pointLights[" + std::to_string(i) + "].emission";
@@ -223,7 +250,7 @@ void Renderer::deferredPass(std::shared_ptr<Scene> scene, GLuint fbo) {
     deferredShader->setVec3(e, pointLights[i].emission);
   }
 
-  const auto& directionalLights = scene->getDirectionalLights();
+  const auto &directionalLights = scene->getDirectionalLights();
   for (int i = 0; i < directionalLights.size(); i++) {
     std::string d = "directionalLights[" + std::to_string(i) + "].direction";
     std::string e = "directionalLights[" + std::to_string(i) + "].emission";
@@ -258,7 +285,8 @@ void Renderer::renderScene(std::shared_ptr<Scene> scene) {
   deferredPass(scene);
 }
 
-void Renderer::renderSceneToFile(std::shared_ptr<Scene> scene, std::string filename) {
+void Renderer::renderSceneToFile(std::shared_ptr<Scene> scene,
+                                 std::string filename) {
   if (!initialized) {
     fprintf(stderr, "Renderer is not initialized\n");
     return;

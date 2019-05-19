@@ -20,8 +20,7 @@ public:
     solver_params.viscosity = 0.0001f;
     solver_params.particle_size = size;
     solver_params.cell_size = 2 * size;
-    solver_params.time_step = 0.001f;  // not used
-    solver_params.particle_mass = size * size * size * 1000.f;
+    solver_params.particle_mass = size * size * size * solver_params.rest_density;
     solver_params.eps = 1e-6;
   }
 
@@ -38,6 +37,8 @@ public:
     sph::mc::init(solver_params.particle_size * .5f);
   }
 
+  void sim_init() {}
+
   void add_particles(std::vector<glm::vec3>& positions) {
     sph::add_particles(positions.data(), positions.size());
   }
@@ -53,7 +54,7 @@ public:
     sph::update_neighbors();
   }
 
-  float step_regular() {
+  float step() {
     return sph::step_regular();
   }
 
@@ -68,5 +69,28 @@ public:
 
   void update_faces(float *vbo, int* num_faces) {
     sph::mc::update_faces(vbo, num_faces);
+  }
+};
+
+
+class SPH_GPU_DF : public SPH_GPU {
+ public:
+  using SPH_GPU::SPH_GPU;
+
+  void sim_init() {
+    sph::df_init();
+  }
+
+  float step() {
+    return sph::df_step();
+  }
+};
+
+
+class SPH_GPU_PCI : public SPH_GPU {
+ public:
+  using SPH_GPU::SPH_GPU;
+  float step() {
+    return sph::pci_step();
   }
 };

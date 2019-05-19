@@ -181,3 +181,28 @@ std::shared_ptr<Object> NewLineCube() {
   obj->name = "Line Cube";
   return obj;
 }
+
+
+std::shared_ptr<Object> NewEnvironmentCube() {
+  std::vector<Vertex> vertices(8);
+  vertices[0].position = {1.f, 1.f, 1.f};
+  vertices[1].position = {-1.f, 1.f, 1.f};
+  vertices[2].position = {1.f, -1.f, 1.f};
+  vertices[3].position = {-1.f, -1.f, 1.f};
+  vertices[4].position = {1.f, 1.f, -1.f};
+  vertices[5].position = {-1.f, 1.f, -1.f};
+  vertices[6].position = {1.f, -1.f, -1.f};
+  vertices[7].position = {-1.f, -1.f, -1.f};
+
+  for (auto &v : vertices) {
+    v.position.x *= 500;
+    v.position.y *= 500;
+    v.position.z *= 500;
+  }
+
+  std::vector<unsigned int> indices = {0, 1, 2, 1, 3, 2, 4, 0, 6, 0, 2, 6,
+                                       5, 4, 7, 4, 6, 7, 1, 5, 3, 5, 7, 3,
+                                       4, 5, 0, 5, 1, 0, 3, 7, 6, 2, 3, 6};
+
+  return NewObject<Object>(std::make_shared<TriangleMesh>(vertices, indices));
+}

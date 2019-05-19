@@ -13,7 +13,6 @@ set(
   -O3 -std=c++11
   )
 
-
 # if (NOT CMAKE_BUILD_TYPE)
 #   set(CMAKE_BUILD_TYPE Debug)
 # endif(NOT CMAKE_BUILD_TYPE)
@@ -26,6 +25,9 @@ find_package(glfw3)
 find_package(Boost COMPONENTS unit_test_framework REQUIRED)
 
 file(GLOB_RECURSE RENDER_SRC "render/*.h" "render/*.cpp")
+
+include_directories("/home/fx/NVIDIA-OptiX-SDK-6.0.0-linux64/include")
+link_directories("/home/fx/NVIDIA-OptiX-SDK-6.0.0-linux64/lib64")
 
 # cuda_add_executable(run main.cpp profiler.h profiler.cpp fluid_domain.h fluid_system.h fluid_system.cpp
 #   particle.h render_util.h utils.h render/camera.cpp render/input.cpp
@@ -46,9 +48,18 @@ add_executable(run_test test/entry.cpp test/cuda.cpp sph_common.h sph_cpu.h
   sph_cpu.cpp sph.cuh sph.cu marching_cube_table.h)
 
 
-target_link_libraries(run ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp pthread)
-# target_link_libraries(run_df ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp
-#   pthread)
-
+target_link_libraries(run ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp pthread optix)
 target_link_libraries(run_test ${CUDA_LIBRARIES} ${Boost_LIBRARIES})
 
+file(GLOB_RECURSE PTX_SRC "cuda/*.cu")
+
+cuda_compile_ptx(
+  cuda_ptx_files
+  ${PTX_SRC}
+)
+
+add_custom_target(ptx ALL
+    DEPENDS ${cuda_ptx_files} ${PTX_SRC}
+    SOURCES ${PTX_SRC})
+
+add_dependencies(run ptx)
