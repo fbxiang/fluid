@@ -124,9 +124,9 @@ int main() {
   uint32_t W = 1200, H = 900;
   init(W, H);
 
-  // GPURenderUtil ru(&fs, W, H);
-  RaytraceUtil ru(&fs, W, H);
-  // ru.renderer->debug = 0;
+  GPURenderUtil ru(&fs, W, H);
+  // RaytraceUtil ru(&fs, W, H);
+  // ru.renderer->debug = 2;
 
   fs.sim_init();
 
@@ -179,6 +179,7 @@ int main() {
       continue;
     }
 
+    int steps = 0;
     profiler::start("simulate");
     // physics
     while (time < 1.f / 60.f) {
@@ -186,7 +187,9 @@ int main() {
       fs.update_mesh();
       // printf("Time step: %f\n", dt);
       time += dt;
+      ++steps;
     }
+    printf("Frame takes %d physics steps.\n", steps);
     profiler::stop("simulate");
 
     // profiler::show();

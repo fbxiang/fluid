@@ -34,7 +34,7 @@ public:
   GPURenderUtil(SPH_GPU *system, uint32_t width, uint32_t height) {
     fluid_system = system;
     scene = std::make_shared<Scene>();
-    setupSponza(scene, width, height);
+    setupEmpty(scene, width, height);
     glm::vec3 size = system->fluid_domain.size;
     glm::vec3 center = system->fluid_domain.corner + size * .5f;
 
@@ -64,10 +64,6 @@ public:
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
     scene->addObject(fluidObj);
-
-    size_t free, used;
-    cudaMemGetInfo(&free, &used);
-    printf("free: %ld; used: %ld\n", free, used);
 
     fluidObj->material.kd = {0, 1, 1};
 

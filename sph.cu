@@ -726,7 +726,6 @@ float pci_step() {
 
   update_velocity_position_pred();
   float dt = update_dt_by_CFL_pred();
-  printf("dt: %f\n", dt);
 
   for (int iter = 0; iter < 3; ++iter) {
     update_density_increment_pressure();
@@ -917,16 +916,28 @@ float* d_corner_value;
 
 __device__ glm::vec3 *faces;
 glm::vec3 *d_faces;
+__device__ glm::vec3 *face_normals;
+glm::vec3 *d_face_normals;
 __device__ int *num_faces;
 int *d_num_faces;
 __device__ int *grid_face_idx;  // used for stream compaction
 int *d_grid_face_idx;
 
 __device__ int get_corner_idx(glm::ivec3 v) {
+  // TODO: get rid of this check?
+  if (v.x < 0 || v.x >= corner_size.x ||
+      v.y < 0 || v.y >= corner_size.y || 
+      v.z < 0 || v.z >= corner_size.z) {
+    return -1;
+  }
   return v.x * corner_size.y * corner_size.z + v.y * corner_size.z + v.z;
 }
 __device__ int get_cell_idx(glm::ivec3 v) {
   return v.x * grid_size.y * grid_size.z + v.y * grid_size.z + v.z;
+}
+__device__ float get_corner_value(glm::ivec3 v) {
+  int i = get_corner_idx(v);
+  return i < 0 ? 0.f : corner_value[i];
 }
 
 __global__ void _update_grid_corners(int n, float radius) {
@@ -973,11 +984,21 @@ __global__ void _update_grid_corners(int n, float radius) {
   }
 }
 
+__device__ glm::vec3 get_vert_normal(glm::ivec3 v) {
+  return -glm::normalize(glm::vec3(
+      get_corner_value(v + glm::ivec3(1, 0, 0)) - get_corner_value(v + glm::ivec3(-1, 0, 0)),
+      get_corner_value(v + glm::ivec3(0, 1, 0)) - get_corner_value(v + glm::ivec3(0, -1, 0)),
+      get_corner_value(v + glm::ivec3(0, 0, 1)) - get_corner_value(v + glm::ivec3(0, 0, -1))));
+}
+
 __device__ glm::vec3 vertex_interp(float isolevel, glm::vec3 p0, glm::vec3 p1, float v0, float v1) {
   return p0 + (isolevel - v0) / (v1 - v0) * (p1 - p0);
 }
+__device__ glm::vec3 normal_interp(float isolevel, glm::vec3 n0, glm::vec3 n1, float v0, float v1) {
+  return glm::normalize(n0 + (isolevel - v0) / (v1 - v0) * (n1 - n0));
+}
 
-__device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
+__device__ int generate_face(int i, float isolevel) {
   int cube_idx = 0;
   int idx = i;
   int x = idx / (grid_size.y * grid_size.z);
@@ -986,17 +1007,19 @@ __device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
   int z = idx % grid_size.z;
 
   glm::vec3 vertlist[12];
+  glm::vec3 normlist[12];
   float val[8];
-  val[0] = corner_value[get_corner_idx (glm::ivec3 (x,     y,     z     ) )];
-  val[1] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y,     z     ) )];
-  val[2] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y,     z + 1 ) )];
-  val[3] = corner_value[get_corner_idx (glm::ivec3 (x,     y,     z + 1 ) )];
-  val[4] = corner_value[get_corner_idx (glm::ivec3 (x,     y + 1, z     ) )];
-  val[5] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y + 1, z     ) )];
-  val[6] = corner_value[get_corner_idx (glm::ivec3 (x + 1, y + 1, z + 1 ) )];
-  val[7] = corner_value[get_corner_idx (glm::ivec3 (x,     y + 1, z + 1 ) )];
+  val[0] = get_corner_value(glm::ivec3 (x,     y,     z     ) );
+  val[1] = get_corner_value(glm::ivec3 (x + 1, y,     z     ) );
+  val[2] = get_corner_value(glm::ivec3 (x + 1, y,     z + 1 ) );
+  val[3] = get_corner_value(glm::ivec3 (x,     y,     z + 1 ) );
+  val[4] = get_corner_value(glm::ivec3 (x,     y + 1, z     ) );
+  val[5] = get_corner_value(glm::ivec3 (x + 1, y + 1, z     ) );
+  val[6] = get_corner_value(glm::ivec3 (x + 1, y + 1, z + 1 ) );
+  val[7] = get_corner_value(glm::ivec3 (x,     y + 1, z + 1 ) );
 
   glm::vec3 p[8];
+  glm::vec3 pn[8];
   p[0] = glm::vec3(x,   y,   z   ) * cell_size + mc_corner;
   p[1] = glm::vec3(x+1, y,   z   ) * cell_size + mc_corner;
   p[2] = glm::vec3(x+1, y,   z+1 ) * cell_size + mc_corner;
@@ -1005,6 +1028,15 @@ __device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
   p[5] = glm::vec3(x+1, y+1, z   ) * cell_size + mc_corner;
   p[6] = glm::vec3(x+1, y+1, z+1 ) * cell_size + mc_corner;
   p[7] = glm::vec3(x,   y+1, z+1 ) * cell_size + mc_corner;
+
+  pn[0] = get_vert_normal(glm::vec3(x,   y,   z   ));
+  pn[1] = get_vert_normal(glm::vec3(x+1, y,   z   ));
+  pn[2] = get_vert_normal(glm::vec3(x+1, y,   z+1 ));
+  pn[3] = get_vert_normal(glm::vec3(x,   y,   z+1 ));
+  pn[4] = get_vert_normal(glm::vec3(x,   y+1, z   ));
+  pn[5] = get_vert_normal(glm::vec3(x+1, y+1, z   ));
+  pn[6] = get_vert_normal(glm::vec3(x+1, y+1, z+1 ));
+  pn[7] = get_vert_normal(glm::vec3(x,   y+1, z+1 ));
 
   if (val[0] < isolevel) cube_idx |= 1;
   if (val[1] < isolevel) cube_idx |= 2;
@@ -1017,34 +1049,59 @@ __device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
 
   if (edgeTable[cube_idx] == 0)
     return 0;
-  if (edgeTable[cube_idx] & 1)
+  if (edgeTable[cube_idx] & 1) {
     vertlist[0] = vertex_interp(isolevel,  p[0], p[1], val[0], val[1]);
-  if (edgeTable[cube_idx] & 2)
-    vertlist[1] = vertex_interp(isolevel,  p[1], p[2], val[1], val[2]);
-  if (edgeTable[cube_idx] & 4)
-    vertlist[2] = vertex_interp(isolevel,  p[2], p[3], val[2], val[3]);
-  if (edgeTable[cube_idx] & 8)
-    vertlist[3] = vertex_interp(isolevel,  p[3], p[0], val[3], val[0]);
-  if (edgeTable[cube_idx] & 16)
-    vertlist[4] = vertex_interp(isolevel,  p[4], p[5], val[4], val[5]);
-  if (edgeTable[cube_idx] & 32)
-    vertlist[5] = vertex_interp(isolevel,  p[5], p[6], val[5], val[6]);
-  if (edgeTable[cube_idx] & 64)
-    vertlist[6] = vertex_interp(isolevel,  p[6], p[7], val[6], val[7]);
-  if (edgeTable[cube_idx] & 128)
-    vertlist[7] = vertex_interp(isolevel,  p[7], p[4], val[7], val[4]);
-  if (edgeTable[cube_idx] & 256)
-    vertlist[8] = vertex_interp(isolevel,  p[0], p[4], val[0], val[4]);
-  if (edgeTable[cube_idx] & 512)
-    vertlist[9] = vertex_interp(isolevel,  p[1], p[5], val[1], val[5]);
-  if (edgeTable[cube_idx] & 1024)
+    normlist[0] = normal_interp(isolevel,  pn[0], pn[1], val[0], val[1]);
+  }
+  if (edgeTable[cube_idx] & 2) {
+    vertlist[ 1] = vertex_interp(isolevel, p[1], p[2], val[1], val[2]);
+    normlist[ 1] = normal_interp(isolevel, pn[1], pn[2], val[1], val[2]);
+  }
+  if (edgeTable[cube_idx] & 4) {
+    vertlist[ 2] = vertex_interp(isolevel, p[2], p[3], val[2], val[3]);
+    normlist[ 2] = normal_interp(isolevel, pn[2], pn[3], val[2], val[3]);
+  }
+  if (edgeTable[cube_idx] & 8) {
+    vertlist [3] = vertex_interp(isolevel, p[3], p[0], val[3], val[0]);
+    normlist [3] = normal_interp(isolevel, pn[3], pn[0], val[3], val[0]);
+  }
+  if (edgeTable[cube_idx] & 16) {
+    vertlist[ 4] = vertex_interp(isolevel, p[4], p[5], val[4], val[5]);
+    normlist[ 4] = normal_interp(isolevel, pn[4], pn[5], val[4], val[5]);
+  }
+  if (edgeTable[cube_idx] & 32) {
+    vertlist[ 5] = vertex_interp(isolevel, p[5], p[6], val[5], val[6]);
+    normlist[ 5] = normal_interp(isolevel, pn[5], pn[6], val[5], val[6]);
+  }
+  if (edgeTable[cube_idx] & 64) {
+    vertlist[ 6] = vertex_interp(isolevel, p[6], p[7], val[6], val[7]);
+    normlist[ 6] = normal_interp(isolevel, pn[6], pn[7], val[6], val[7]);
+  }
+  if (edgeTable[cube_idx] & 128) {
+    vertlist[ 7] = vertex_interp(isolevel, p[7], p[4], val[7], val[4]);
+    normlist[ 7] = normal_interp(isolevel, pn[7], pn[4], val[7], val[4]);
+  }
+  if (edgeTable[cube_idx] & 256) {
+    vertlist[ 8] = vertex_interp(isolevel, p[0], p[4], val[0], val[4]);
+    normlist[ 8] = normal_interp(isolevel, pn[0], pn[4], val[0], val[4]);
+  }
+  if (edgeTable[cube_idx] & 512) {
+    vertlist[ 9] = vertex_interp(isolevel, p[1], p[5], val[1], val[5]);
+    normlist[ 9] = normal_interp(isolevel, pn[1], pn[5], val[1], val[5]);
+  }
+  if (edgeTable[cube_idx] & 1024) {
     vertlist[10] = vertex_interp(isolevel, p[2], p[6], val[2], val[6]);
-  if (edgeTable[cube_idx] & 2048)
+    normlist[10] = normal_interp(isolevel, pn[2], pn[6], val[2], val[6]);
+  }
+  if (edgeTable[cube_idx] & 2048) {
     vertlist[11] = vertex_interp(isolevel, p[3], p[7], val[3], val[7]);
+    normlist[11] = normal_interp(isolevel, pn[3], pn[7], val[3], val[7]);
+  }
 
   int vi;
   for (vi = 0; triTable[cube_idx][vi] != -1; vi += 1) {
-    triangles[vi] = vertlist[triTable[cube_idx][vi]];
+    faces[15 * i + vi] = vertlist[triTable[cube_idx][vi]];
+    face_normals[15 * i + vi] = normlist[triTable[cube_idx][vi]];
   }
   return vi / 3;
 }
@@ -1052,7 +1109,7 @@ __device__ int generate_face(int i, float isolevel, glm::vec3* triangles) {
 __global__ void _update_faces(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
-    num_faces[i] = generate_face(i, 0.2f, &faces[15 * i]);
+    num_faces[i] = generate_face(i, 0.2f);
   }
 }
 
@@ -1065,7 +1122,9 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
       glm::vec3 v1 = faces[15 * i + 3 * t    ];
       glm::vec3 v2 = faces[15 * i + 3 * t + 1];
       glm::vec3 v3 = faces[15 * i + 3 * t + 2];
-      glm::vec3 normal = -glm::normalize(glm::cross(v2-v1, v3-v1));
+      glm::vec3 vn1 = face_normals[15 * i + 3 * t    ];
+      glm::vec3 vn2 = face_normals[15 * i + 3 * t + 1];
+      glm::vec3 vn3 = face_normals[15 * i + 3 * t + 2];
 
       // vertex
       vbo[18 * grid_face_idx[i] + j++] = v1.x;
@@ -1073,9 +1132,9 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
       vbo[18 * grid_face_idx[i] + j++] = v1.z;
 
       // normal
-      vbo[18 * grid_face_idx[i] + j++] = normal.x;
-      vbo[18 * grid_face_idx[i] + j++] = normal.y;
-      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+      vbo[18 * grid_face_idx[i] + j++] = vn1.x;
+      vbo[18 * grid_face_idx[i] + j++] = vn1.y;
+      vbo[18 * grid_face_idx[i] + j++] = vn1.z;
 
       // vertex
       vbo[18 * grid_face_idx[i] + j++] = v2.x;
@@ -1083,9 +1142,9 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
       vbo[18 * grid_face_idx[i] + j++] = v2.z;
 
       // normal
-      vbo[18 * grid_face_idx[i] + j++] = normal.x;
-      vbo[18 * grid_face_idx[i] + j++] = normal.y;
-      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+      vbo[18 * grid_face_idx[i] + j++] = vn2.x;
+      vbo[18 * grid_face_idx[i] + j++] = vn2.y;
+      vbo[18 * grid_face_idx[i] + j++] = vn2.z;
 
       // vertex
       vbo[18 * grid_face_idx[i] + j++] = v3.x;
@@ -1093,9 +1152,9 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
       vbo[18 * grid_face_idx[i] + j++] = v3.z;
 
       // normal
-      vbo[18 * grid_face_idx[i] + j++] = normal.x;
-      vbo[18 * grid_face_idx[i] + j++] = normal.y;
-      vbo[18 * grid_face_idx[i] + j++] = normal.z;
+      vbo[18 * grid_face_idx[i] + j++] = vn3.x;
+      vbo[18 * grid_face_idx[i] + j++] = vn3.y;
+      vbo[18 * grid_face_idx[i] + j++] = vn3.z;
     }
   }
   if (i == n - 1) {
@@ -1105,7 +1164,7 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
 
 void update_faces(float* vbo, int* h_total_num_faces) {
   int total_num_cells = h_grid_size.x * h_grid_size.y * h_grid_size.z;
-  _update_faces<<<(total_num_cells + N_THREADS - 1) / N_THREADS, N_THREADS>>>(total_num_cells);
+  _update_faces<<<(total_num_cells + 512 - 1) / 512, 512>>>(total_num_cells);
 
   // stream compaction
   thrust::device_ptr<int> num_faces_ptr = thrust::device_pointer_cast(d_num_faces);
@@ -1152,6 +1211,9 @@ void init(float cell_size) {
   // initialize face storage
   CUDA_CHECK_RETURN(cudaMalloc(&d_faces, total_grid_size * 15 * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::faces, &d_faces, sizeof(void *), 0, cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_face_normals, total_grid_size * 15 * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::face_normals, &d_face_normals, sizeof(void *), 0, cudaMemcpyHostToDevice));
 
   CUDA_CHECK_RETURN(cudaMalloc(&d_num_faces, total_grid_size * sizeof(int)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(mc::num_faces, &d_num_faces, sizeof(void *), 0, cudaMemcpyHostToDevice));
