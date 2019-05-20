@@ -923,6 +923,7 @@ int *d_num_faces;
 __device__ int *grid_face_idx;  // used for stream compaction
 int *d_grid_face_idx;
 
+
 __device__ int get_corner_idx(glm::ivec3 v) {
   // TODO: get rid of this check?
   if (v.x < 0 || v.x >= corner_size.x ||
@@ -1038,14 +1039,14 @@ __device__ int generate_face(int i, float isolevel) {
   pn[6] = get_vert_normal(glm::vec3(x+1, y+1, z+1 ));
   pn[7] = get_vert_normal(glm::vec3(x,   y+1, z+1 ));
 
-  if (val[0] < isolevel) cube_idx |= 1;
-  if (val[1] < isolevel) cube_idx |= 2;
-  if (val[2] < isolevel) cube_idx |= 4;
-  if (val[3] < isolevel) cube_idx |= 8;
-  if (val[4] < isolevel) cube_idx |= 16;
-  if (val[5] < isolevel) cube_idx |= 32;
-  if (val[6] < isolevel) cube_idx |= 64;
-  if (val[7] < isolevel) cube_idx |= 128;
+  if (val[0] > isolevel) cube_idx |= 1;
+  if (val[1] > isolevel) cube_idx |= 2;
+  if (val[2] > isolevel) cube_idx |= 4;
+  if (val[3] > isolevel) cube_idx |= 8;
+  if (val[4] > isolevel) cube_idx |= 16;
+  if (val[5] > isolevel) cube_idx |= 32;
+  if (val[6] > isolevel) cube_idx |= 64;
+  if (val[7] > isolevel) cube_idx |= 128;
 
   if (edgeTable[cube_idx] == 0)
     return 0;

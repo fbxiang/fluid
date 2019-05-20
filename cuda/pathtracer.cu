@@ -58,6 +58,7 @@ RT_PROGRAM void camera() {
     prd.done        = false;
     prd.depth       = 0;
     prd.seed        = seed;
+    prd.max_depth_override = 0;
 
     for(;;) {
       Ray ray = make_Ray(ray_origin, ray_direction, pathtrace_ray_type, scene_epsilon, RT_DEFAULT_MAX);
@@ -69,7 +70,7 @@ RT_PROGRAM void camera() {
       }
       prd.depth++;
 
-      if (prd.depth >= n_rays) {
+      if (prd.depth >= prd.max_depth_override && prd.depth >= n_rays) {
         break;
       }
 

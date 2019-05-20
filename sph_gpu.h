@@ -17,7 +17,7 @@ public:
     solver_params.rest_density = 1000.f;
     solver_params.k = 7.f;
     solver_params.gamma = 7.f;
-    solver_params.viscosity = 0.0001f;
+    solver_params.viscosity = 0.00001;
     solver_params.particle_size = size;
     solver_params.cell_size = 2 * size;
     solver_params.particle_mass = size * size * size * solver_params.rest_density;

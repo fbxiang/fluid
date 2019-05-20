@@ -76,7 +76,6 @@ void OptixRenderer::initSceneGeometry(std::shared_ptr<Scene> scene) {
 
   for (const auto& obj : scene->getObjects()) {
     if (obj->getMesh()) {
-      printf("Init %s\n", obj->name.c_str());
       topGroup->addChild(getObjectTransform(obj));
     }
   }
@@ -246,16 +245,34 @@ optix::Transform OptixRenderer::getObjectTransform(std::shared_ptr<Object> obj) 
       _material_shadow_any_hit = context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
       _material_any_hit = context->createProgramFromPTXFile(ptxFile, "any_hit");
     }
-    mat->setClosestHitProgram(0, _material_closest_hit);
-    mat->setAnyHitProgram(0, _material_any_hit);
-    mat->setAnyHitProgram(1, _material_shadow_any_hit);
-    mat["kd"]->setFloat(obj->material.kd.x, obj->material.kd.y, obj->material.kd.z);
-    if (obj->material.kd_map->getId()) {
-      mat["has_kd_map"]->setInt(1);
-      mat["kd_map"]->setTextureSampler(getTextureSampler(obj->material.kd_map));
+    if (!_material_mirror_closest_hit) {
+      std::string ptxFile = get_ptx_filename("material_mirror");
+
+      _material_mirror_closest_hit =
+          context->createProgramFromPTXFile(ptxFile, "closest_hit");
+      _material_mirror_shadow_any_hit =
+          context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
+      _material_mirror_any_hit = context->createProgramFromPTXFile(ptxFile, "any_hit");
+    }
+
+    if (obj->material.type == "mirror") {
+      mat->setClosestHitProgram(0, _material_mirror_closest_hit);
+      mat->setAnyHitProgram(0, _material_mirror_any_hit);
+      mat->setAnyHitProgram(1, _material_mirror_shadow_any_hit);
     } else {
-      mat["has_kd_map"]->setInt(0);
-      mat["kd_map"]->setTextureSampler(getEmptySampler());
+      mat->setClosestHitProgram(0, _material_closest_hit);
+      mat->setAnyHitProgram(0, _material_any_hit);
+      mat->setAnyHitProgram(1, _material_shadow_any_hit);
+      mat["kd"]->setFloat(obj->material.kd.x, obj->material.kd.y,
+                          obj->material.kd.z);
+      if (obj->material.kd_map->getId()) {
+        mat["has_kd_map"]->setInt(1);
+        mat["kd_map"]->setTextureSampler(
+            getTextureSampler(obj->material.kd_map));
+      } else {
+        mat["has_kd_map"]->setInt(0);
+        mat["kd_map"]->setTextureSampler(getEmptySampler());
+      }
     }
     gio->setMaterial(0, mat);
 
@@ -392,6 +409,7 @@ optix::TextureSampler OptixRenderer::getEmptySampler() {
   return _empty_sampler;
 }
 
+
 void OptixRenderer::renderSceneToFile(std::shared_ptr<Scene> scene, std::string filename) {
   if (iterations >= max_iterations) return;
 
@@ -442,4 +460,13 @@ void OptixRenderer::renderSceneToFile(std::shared_ptr<Scene> scene, std::string 
   writeToFile(outputTex, width, height, filename);
 
   iterations++;
+}
+
+void OptixRenderer::renderCurrentToFile(std::string filename) {
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER,
+               context["output_buffer"]->getBuffer()->getGLBOId());
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA,
+               GL_FLOAT, 0);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  writeToFile(outputTex, width, height, filename);
 }

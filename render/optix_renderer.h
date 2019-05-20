@@ -34,6 +34,9 @@ private:
   optix::Program _material_closest_hit = 0;
   optix::Program _material_any_hit = 0;
   optix::Program _material_shadow_any_hit = 0;
+  optix::Program _material_mirror_closest_hit = 0;
+  optix::Program _material_mirror_any_hit = 0;
+  optix::Program _material_mirror_shadow_any_hit = 0;
 
   optix::Transform getObjectTransform(std::shared_ptr<Object> obj);
   optix::Geometry getMeshGeometry(std::shared_ptr<TriangleMesh> mesh);
@@ -74,4 +77,5 @@ private:
  public:
   void renderScene(std::shared_ptr<Scene> scene);
   void renderSceneToFile(std::shared_ptr<Scene> scene, std::string filename);
+  void renderCurrentToFile(std::string filename);
 };

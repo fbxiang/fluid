@@ -58,6 +58,7 @@ public:
 
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
+    fluidObj->material.type = "mirror";
     scene->addObject(fluidObj);
 
     size_t free, used;
@@ -92,7 +93,7 @@ public:
     CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
   }
 
-  void renderToFile(uint32_t i = 0) {
-    renderer->renderSceneToFile(scene, "/tmp/sph_" + std::to_string(i) + ".png");
+  void renderToFile(const std::string& dir, uint32_t i = 0) {
+    renderer->renderCurrentToFile(dir + "/sph_" + std::to_string(i) + ".png");
   }
 };

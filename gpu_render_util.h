@@ -1,12 +1,14 @@
 #pragma once
 #include "render/renderer.h"
 #include "render/scene.h"
+#include "scene_util.h"
 #include "sph.cuh"
 #include "sph_gpu.h"
 #include <cuda_gl_interop.h>
 #include <glm/gtx/compatibility.hpp>
-#include "scene_util.h"
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #define N_THREADS 1024
 #define CUDA_CHECK_RETURN(value)                                               \
@@ -34,23 +36,24 @@ public:
   GPURenderUtil(SPH_GPU *system, uint32_t width, uint32_t height) {
     fluid_system = system;
     scene = std::make_shared<Scene>();
-    setupEmpty(scene, width, height);
+    // setupEmpty(scene, width, height);
+    setupSponza(scene, width, height);
     glm::vec3 size = system->fluid_domain.size;
     glm::vec3 center = system->fluid_domain.corner + size * .5f;
 
-    scene->setEnvironmentMap("../assets/ame_desert/desertsky_ft.tga",
-                             "../assets/ame_desert/desertsky_bk.tga",
-                             "../assets/ame_desert/desertsky_up.tga",
-                             "../assets/ame_desert/desertsky_dn.tga",
-                             "../assets/ame_desert/desertsky_lf.tga",
-                             "../assets/ame_desert/desertsky_rt.tga");
+    // scene->setEnvironmentMap("../assets/ame_desert/desertsky_ft.tga",
+    //                          "../assets/ame_desert/desertsky_bk.tga",
+    //                          "../assets/ame_desert/desertsky_up.tga",
+    //                          "../assets/ame_desert/desertsky_dn.tga",
+    //                          "../assets/ame_desert/desertsky_lf.tga",
+    //                          "../assets/ame_desert/desertsky_rt.tga");
 
-    auto lineCube = NewLineCube();
-    lineCube->material.kd = {1, 1, 1};
-    scene->addObject(lineCube);
-    lineCube->position =
-        system->fluid_domain.corner + system->fluid_domain.size / 2.f;
-    lineCube->scale = system->fluid_domain.size / 2.f;
+    // auto lineCube = NewLineCube();
+    // lineCube->material.kd = {1, 1, 1};
+    // scene->addObject(lineCube);
+    // lineCube->position =
+    //     system->fluid_domain.corner + system->fluid_domain.size / 2.f;
+    // lineCube->scale = system->fluid_domain.size / 2.f;
 
     int mc_num_cells = system->get_mc_num_cells();
 
@@ -74,9 +77,12 @@ public:
     glEnable(GL_FRAMEBUFFER_SRGB_EXT);
   }
 
-  void render() {
-    update_particles();
+  void render_debug() {
+    update_debug_particles();
     renderer->renderScene(scene);
+  }
+
+  void render() {
 
     float *d_vertex_pointer;
     size_t size;
@@ -90,14 +96,28 @@ public:
     std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())
         ->setVertexCount(num_faces * 3);
     CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
+    renderer->renderScene(scene);
   }
 
-  void renderToFile(uint32_t i = 0) {
-    renderer->renderSceneToFile(scene,
-                                "/tmp/sph_" + std::to_string(i) + ".png");
+  void renderToFile(const std::string& directory, uint32_t i = 0) {
+    std::stringstream ss;
+    ss << std::setw(10) << std::setfill('0') << i;
+    std::string s = ss.str();
+    renderer->renderSceneToFile(scene, directory + "/sph_" + s + ".png");
   }
 
-  void update_particles() {
+  void init_debug_particles() {
+    std::vector<glm::vec3> positions = fluid_system->get_particles();
+    for (int i = 0; i < positions.size(); ++i) {
+      auto p = NewSphere();
+      p->scale = glm::vec3(fluid_system->solver_params.particle_size / 2);
+      p->material.kd = {0, 1, 1};
+      scene->addObject(p);
+      particles.push_back(p);
+    }
+  }
+
+  void update_debug_particles() {
     std::vector<glm::vec3> positions = fluid_system->get_particles();
     for (uint32_t i = 0; i < particles.size(); ++i) {
       particles[i]->position = positions[i];

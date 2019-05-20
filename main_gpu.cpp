@@ -108,30 +108,30 @@ int main() {
   float h = 0.015;
   SPH_GPU_PCI fs(h);
 
-  fs.set_domain({0, 0, 0}, {0.5, 1.0, 0.5});
+  fs.set_domain({-0.814, 0.028, -0.5}, {1.37, 2, 0.85});
   fs.cuda_init();
   fs.marching_cube_init();
-  std::vector<glm::vec3> positions = fill_block({0.1, 0.1, 0.1}, {0.3, 0.1, 0.3}, h);
+  std::vector<glm::vec3> positions = fill_block({-0.8, 0.1, -0.3}, {0.3, 0.5, 0.3}, h);
   fs.add_particles(positions);
 
-  positions = fill_block({0.1, 0.3, 0.1}, {0.3, 0.1, 0.3}, h);
-  fs.add_particles(positions);
+  // positions = fill_block({0.1, 0.3, -0.3}, {0.3, 0.1, 0.3}, h);
+  // fs.add_particles(positions);
 
-  positions = fill_block({0.1, 0.5, 0.1}, {0.3, 0.1, 0.3}, h);
-  fs.add_particles(positions);
+  // positions = fill_block({0.1, 0.5, -0.3}, {0.3, 0.1, 0.3}, h);
+  // fs.add_particles(positions);
   sph::print_summary();
 
   uint32_t W = 1200, H = 900;
   init(W, H);
 
-  GPURenderUtil ru(&fs, W, H);
-  // RaytraceUtil ru(&fs, W, H);
+  // GPURenderUtil ru(&fs, W, H);
+  RaytraceUtil ru(&fs, W, H);
   // ru.renderer->debug = 2;
+  // ru.init_debug_particles();
 
   fs.sim_init();
 
   int frame = 0;
-  int iter = 0;
   double time = glfwGetTime();
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
@@ -162,9 +162,9 @@ int main() {
     updateScene(ru.scene, dt);
     time = newTime;
 
-    // ru.render_debug();
     profiler::start("render");
     ru.render();
+    ru.renderToFile("/tmp/sph", frame);
     if (!paused) {
       ru.invalidate_camera();
     }
@@ -193,6 +193,7 @@ int main() {
     profiler::stop("simulate");
 
     // profiler::show();
+    frame++;
   }
   return 0;
 }

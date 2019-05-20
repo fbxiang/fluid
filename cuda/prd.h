@@ -10,6 +10,7 @@ struct PerRayData {
   float3 origin;
   float3 direction;
   int depth;
+  int max_depth_override;
   int done;
   unsigned int seed;
 };
