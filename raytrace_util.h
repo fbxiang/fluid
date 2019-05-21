@@ -58,6 +58,7 @@ public:
 
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
+    // fluidObj->material.type = "transparent";
     fluidObj->material.type = "mirror";
     scene->addObject(fluidObj);
 

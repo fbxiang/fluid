@@ -104,6 +104,23 @@ std::vector<glm::vec3> fill_block(glm::vec3 corner, glm::vec3 size,
   return positions;
 }
 
+std::vector<glm::vec3> fill_prism(glm::vec3 corner, glm::vec3 size,
+                                  float step) {
+  std::vector<glm::vec3> positions;
+  glm::ivec3 n = size / step;
+  for (int i = 0; i < n.x; ++i) {
+    for (int j = 0; j < n.y; ++j) {
+      for (int k = 0; k < n.z - n.z * j / n.y; ++k) {
+        glm::vec3 jitter = {rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f),
+                            rand_float(-step / 4.f, step / 4.f)};
+        positions.push_back({{corner + glm::vec3(i, j, k) * step + jitter}});
+      }
+    }
+  }
+  return positions;
+}
+
 int main() {
   float h = 0.015;
   SPH_GPU_PCI fs(h);
@@ -111,14 +128,9 @@ int main() {
   fs.set_domain({-0.814, 0.028, -0.5}, {1.37, 2, 0.85});
   fs.cuda_init();
   fs.marching_cube_init();
-  std::vector<glm::vec3> positions = fill_block({-0.8, 0.1, -0.3}, {0.3, 0.5, 0.3}, h);
+  std::vector<glm::vec3> positions = fill_prism({-0.812, 0.04, -0.45}, {1.3, 0.4, 0.4}, h);
   fs.add_particles(positions);
 
-  // positions = fill_block({0.1, 0.3, -0.3}, {0.3, 0.1, 0.3}, h);
-  // fs.add_particles(positions);
-
-  // positions = fill_block({0.1, 0.5, -0.3}, {0.3, 0.1, 0.3}, h);
-  // fs.add_particles(positions);
   sph::print_summary();
 
   uint32_t W = 1200, H = 900;
@@ -164,7 +176,7 @@ int main() {
 
     profiler::start("render");
     ru.render();
-    ru.renderToFile("/tmp/sph", frame);
+    // ru.renderToFile("/tmp/sph", frame);
     if (!paused) {
       ru.invalidate_camera();
     }
@@ -182,7 +194,7 @@ int main() {
     int steps = 0;
     profiler::start("simulate");
     // physics
-    while (time < 1.f / 60.f) {
+    while (time < 1.f / 200.f) {
       float dt = fs.step();
       fs.update_mesh();
       // printf("Time step: %f\n", dt);

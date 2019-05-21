@@ -13,7 +13,9 @@ void setupSponza(std::shared_ptr<Scene> scene, uint32_t width,
 
   auto cam = NewObject<Camera>();
 
-  cam->position = {2.85, 0.5, 0};
+  cam->position = {1.5, 0.5, -0.5};
+  cam->rotatePitch(-0.2);
+  cam->rotateYaw(0.2);
   cam->rotateYaw(1.6);
   cam->rotatePitch(0.06);
   cam->fovy = glm::radians(45.f);

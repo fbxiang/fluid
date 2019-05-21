@@ -34,6 +34,9 @@ private:
   optix::Program _material_closest_hit = 0;
   optix::Program _material_any_hit = 0;
   optix::Program _material_shadow_any_hit = 0;
+  optix::Program _material_fluid_closest_hit = 0;
+  optix::Program _material_fluid_any_hit = 0;
+  optix::Program _material_fluid_shadow_any_hit = 0;
   optix::Program _material_mirror_closest_hit = 0;
   optix::Program _material_mirror_any_hit = 0;
   optix::Program _material_mirror_shadow_any_hit = 0;

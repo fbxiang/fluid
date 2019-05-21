@@ -7,6 +7,7 @@
 
 
 rtDeclareVariable(rtObject,          top_object,                ,                           );
+rtDeclareVariable(rtObject,          top_shadower,              ,                           );
 rtDeclareVariable(float,             scene_epsilon,             ,                           );
 rtDeclareVariable(unsigned int,      pathtrace_shadow_ray_type, ,                           );
 
@@ -38,6 +39,8 @@ RT_PROGRAM void closest_hit() {
   float3 ffnormal               = faceforward( world_shading_normal, -ray.direction, world_geometric_normal );
   float3 hitpoint               = rtTransformPoint(RT_OBJECT_TO_WORLD, hit_point);
 
+  current_prd.max_depth_override = 0;
+
   float3 kd_val = kd;
   if (has_kd_map) {
     kd_val = make_float3( tex2D( kd_map, texcoord.x, texcoord.y ) );
@@ -63,7 +66,7 @@ RT_PROGRAM void closest_hit() {
       PerRayData_shadow shadow_prd;
       shadow_prd.inShadow = false;
       Ray shadow_ray = make_Ray(hitpoint, L, pathtrace_shadow_ray_type, scene_epsilon, RT_DEFAULT_MAX);
-      rtTrace(top_object, shadow_ray, shadow_prd);
+      rtTrace(top_shadower, shadow_ray, shadow_prd);
 
       if (!shadow_prd.inShadow) {
         result += nDl * light.emission * kd_val;
@@ -80,7 +83,7 @@ RT_PROGRAM void closest_hit() {
       PerRayData_shadow shadow_prd;
       shadow_prd.inShadow = false;
       Ray shadow_ray = make_Ray(hitpoint, L, pathtrace_shadow_ray_type, scene_epsilon, Ldist - scene_epsilon);
-      rtTrace(top_object, shadow_ray, shadow_prd);
+      rtTrace(top_shadower, shadow_ray, shadow_prd);
 
       if (!shadow_prd.inShadow) {
         result += kd_val * nDl * light.emission / Ldist / Ldist;

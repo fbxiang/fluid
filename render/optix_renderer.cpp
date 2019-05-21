@@ -72,15 +72,20 @@ void OptixRenderer::init() {
 void OptixRenderer::initSceneGeometry(std::shared_ptr<Scene> scene) {
   sceneInitialized = true;
   optix::Group topGroup = context->createGroup();
+  optix::Group shadowGroup = context->createGroup();
   topGroup->setAcceleration(context->createAcceleration(ACCEL));
+  shadowGroup->setAcceleration(context->createAcceleration(ACCEL));
 
   for (const auto& obj : scene->getObjects()) {
     if (obj->getMesh()) {
       topGroup->addChild(getObjectTransform(obj));
+      if (obj->material.type != "transparent") {
+        shadowGroup->addChild(getObjectTransform(obj));
+      }
     }
   }
   context["top_object"]->set(topGroup);
-  context["top_shadower"]->set(topGroup);
+  context["top_shadower"]->set(shadowGroup);
 
   std::string ptxFile;
   if (auto envMap = scene->getEnvironmentMap()) {
@@ -245,6 +250,15 @@ optix::Transform OptixRenderer::getObjectTransform(std::shared_ptr<Object> obj) 
       _material_shadow_any_hit = context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
       _material_any_hit = context->createProgramFromPTXFile(ptxFile, "any_hit");
     }
+    if (!_material_fluid_closest_hit) {
+      std::string ptxFile = get_ptx_filename("material_transparent");
+
+      _material_fluid_closest_hit =
+          context->createProgramFromPTXFile(ptxFile, "closest_hit");
+      _material_fluid_shadow_any_hit =
+          context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
+      _material_fluid_any_hit = context->createProgramFromPTXFile(ptxFile, "any_hit");
+    }
     if (!_material_mirror_closest_hit) {
       std::string ptxFile = get_ptx_filename("material_mirror");
 
@@ -252,10 +266,15 @@ optix::Transform OptixRenderer::getObjectTransform(std::shared_ptr<Object> obj) 
           context->createProgramFromPTXFile(ptxFile, "closest_hit");
       _material_mirror_shadow_any_hit =
           context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
-      _material_mirror_any_hit = context->createProgramFromPTXFile(ptxFile, "any_hit");
+      _material_mirror_any_hit =
+          context->createProgramFromPTXFile(ptxFile, "any_hit");
     }
 
-    if (obj->material.type == "mirror") {
+    if (obj->material.type == "transparent") {
+      mat->setClosestHitProgram(0, _material_fluid_closest_hit);
+      mat->setAnyHitProgram(0, _material_fluid_any_hit);
+      mat->setAnyHitProgram(1, _material_fluid_shadow_any_hit);
+    } else if (obj->material.type == "mirror") {
       mat->setClosestHitProgram(0, _material_mirror_closest_hit);
       mat->setAnyHitProgram(0, _material_mirror_any_hit);
       mat->setAnyHitProgram(1, _material_mirror_shadow_any_hit);
@@ -463,6 +482,7 @@ void OptixRenderer::renderSceneToFile(std::shared_ptr<Scene> scene, std::string 
 }
 
 void OptixRenderer::renderCurrentToFile(std::string filename) {
+  glBindTexture(GL_TEXTURE_2D, outputTex);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER,
                context["output_buffer"]->getBuffer()->getGLBOId());
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA,
