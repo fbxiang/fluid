@@ -79,9 +79,7 @@ void OptixRenderer::initSceneGeometry(std::shared_ptr<Scene> scene) {
   for (const auto& obj : scene->getObjects()) {
     if (obj->getMesh()) {
       topGroup->addChild(getObjectTransform(obj));
-      if (obj->material.type != "transparent") {
-        shadowGroup->addChild(getObjectTransform(obj));
-      }
+      shadowGroup->addChild(getObjectTransform(obj));
     }
   }
   context["top_object"]->set(topGroup);

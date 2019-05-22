@@ -16,5 +16,6 @@ struct PerRayData {
 };
 
 struct PerRayData_shadow {
+  float3 attenuation;
   bool inShadow;
 };

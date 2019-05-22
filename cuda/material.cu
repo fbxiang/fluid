@@ -64,12 +64,13 @@ RT_PROGRAM void closest_hit() {
     const float nDl = dot(ffnormal, L);
     if (nDl > 0.f) {
       PerRayData_shadow shadow_prd;
+      shadow_prd.attenuation = make_float3(1.0f);
       shadow_prd.inShadow = false;
       Ray shadow_ray = make_Ray(hitpoint, L, pathtrace_shadow_ray_type, scene_epsilon, RT_DEFAULT_MAX);
       rtTrace(top_shadower, shadow_ray, shadow_prd);
 
       if (!shadow_prd.inShadow) {
-        result += nDl * light.emission * kd_val;
+        result += nDl * light.emission * kd_val * shadow_prd.attenuation;
       }
     }
   }
@@ -81,12 +82,13 @@ RT_PROGRAM void closest_hit() {
     const float nDl = dot(ffnormal, L);
     if (nDl > 0.f) {
       PerRayData_shadow shadow_prd;
+      shadow_prd.attenuation = make_float3(1.0f);
       shadow_prd.inShadow = false;
       Ray shadow_ray = make_Ray(hitpoint, L, pathtrace_shadow_ray_type, scene_epsilon, Ldist - scene_epsilon);
       rtTrace(top_shadower, shadow_ray, shadow_prd);
 
       if (!shadow_prd.inShadow) {
-        result += kd_val * nDl * light.emission / Ldist / Ldist;
+        result += kd_val * nDl * light.emission / Ldist / Ldist * shadow_prd.attenuation;
       }
     }
   }

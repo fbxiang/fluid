@@ -89,6 +89,6 @@ RT_PROGRAM void shadow_any_hit() {
     return;
   }
 
-  prd_shadow.inShadow = true;
-  rtTerminateRay();
+  prd_shadow.attenuation = make_float3(0.8, 0.9, 1.0);
+  // rtTerminateRay();
 }
