@@ -60,8 +60,10 @@ RT_PROGRAM void closest_hit() {
     fr = 1;
   } else {
     t = normalize(z - sqrt(1 - z2) * n);
-    float rs = (ni * dot(n, d) + nt * dot(n, t)) / (ni * dot(n, d) - nt * dot(n, t));
-    float rp = (-nt * dot(n, d) - ni * dot(n, t)) / (nt * dot(n, d) - ni * dot(n, t));
+    float dnd = dot(n, d);
+    float dnt = dot(n, t);
+    float rs = (nt * dnd + ni * dnt) / (nt * dnd - ni * dnt);
+    float rp = (ni * dnd + nt * dnt) / (ni * dnd - nt * dnt);
     fr = (rs * rs + rp * rp) / 2.f;
   }
 
@@ -90,5 +92,4 @@ RT_PROGRAM void shadow_any_hit() {
   }
 
   prd_shadow.attenuation = make_float3(0.8, 0.9, 1.0);
-  // rtTerminateRay();
 }

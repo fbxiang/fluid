@@ -21,7 +21,10 @@
     }                                                                          \
   }
 
+
 class GPURenderUtil {
+  static constexpr int MAX_FACES = 100000;
+
 public:
   std::shared_ptr<Scene> scene;
   std::shared_ptr<Object> domain;
@@ -60,7 +63,7 @@ public:
     // TODO: maybe optimize using EBO?
     // each cell can have 5 faces (15 vertices)
     std::shared_ptr<DynamicMesh> mesh =
-        std::make_shared<DynamicMesh>(mc_num_cells * 15);
+        std::make_shared<DynamicMesh>(std::min(mc_num_cells * 15, 3 * MAX_FACES));
     CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
         &resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
 
@@ -91,7 +94,7 @@ public:
         (void **)&d_vertex_pointer, &size, resource));
     int num_faces = 0;
     fluid_system->update_mesh();
-    fluid_system->update_faces(d_vertex_pointer, &num_faces);
+    fluid_system->update_faces(d_vertex_pointer, &num_faces, MAX_FACES);
     // printf("Num faces: %d\n", num_faces);
     std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())
         ->setVertexCount(num_faces * 3);

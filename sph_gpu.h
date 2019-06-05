@@ -67,8 +67,8 @@ public:
     sph::mc::update_grid_corners();
   }
 
-  void update_faces(float *vbo, int* num_faces) {
-    sph::mc::update_faces(vbo, num_faces);
+  void update_faces(float *vbo, int* num_faces, int max_num_faces) {
+    sph::mc::update_faces(vbo, num_faces, max_num_faces);
   }
 };
 

@@ -2,6 +2,7 @@
 
 static std::map<std::string, long> current_time;
 static std::map<std::string, long> total_time;
+static std::map<std::string, long> last_time;
 static std::map<std::string, long> times;
 
 void profiler::start(std::string name) {
@@ -30,7 +31,8 @@ void profiler::stop(std::string name) {
     times[name] = 0l;
   }
 
-  total_time[name] += value_ms - current_time[name];
+  last_time[name] = value_ms - current_time[name];
+  total_time[name] += last_time[name];
   ++times[name];
 }
 
@@ -38,4 +40,8 @@ void profiler::show() {
   for (auto kp : total_time) {
     std::cout << kp.first << ": " << kp.second / (double)times[kp.first] << "ms" << std::endl;
   }
+}
+
+double profiler::get(std::string name) {
+  return last_time[name];
 }

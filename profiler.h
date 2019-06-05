@@ -12,4 +12,6 @@ void stop(std::string name);
 
 void show(); 
 
+double get(std::string name);
+
 } // namespace profiler

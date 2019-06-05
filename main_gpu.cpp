@@ -122,7 +122,7 @@ std::vector<glm::vec3> fill_prism(glm::vec3 corner, glm::vec3 size,
 }
 
 int main() {
-  float h = 0.015;
+  float h = 0.02;
   SPH_GPU_PCI fs(h);
 
   fs.set_domain({-0.814, 0.028, -0.5}, {1.37, 2, 0.85});
@@ -136,10 +136,9 @@ int main() {
   uint32_t W = 1200, H = 900;
   init(W, H);
 
-  // GPURenderUtil ru(&fs, W, H);
+  // RaytraceUtil ru(&fs, W, H);
   RaytraceUtil ru(&fs, W, H);
-  // ru.renderer->debug = 2;
-  // ru.init_debug_particles();
+  // ru.renderer->debug = 3;
 
   fs.sim_init();
 
@@ -194,7 +193,7 @@ int main() {
     int steps = 0;
     profiler::start("simulate");
     // physics
-    while (time < 1.f / 200.f) {
+    while (time < 1.f / 120.f) {
       float dt = fs.step();
       fs.update_mesh();
       // printf("Time step: %f\n", dt);
@@ -203,6 +202,7 @@ int main() {
     }
     printf("Frame takes %d physics steps.\n", steps);
     profiler::stop("simulate");
+    printf("Frame takes %f ms\n", profiler::get("simulate"));
 
     // profiler::show();
     frame++;

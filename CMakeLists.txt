@@ -29,27 +29,9 @@ file(GLOB_RECURSE RENDER_SRC "render/*.h" "render/*.cpp")
 include_directories("/home/fx/NVIDIA-OptiX-SDK-6.0.0-linux64/include")
 link_directories("/home/fx/NVIDIA-OptiX-SDK-6.0.0-linux64/lib64")
 
-# cuda_add_executable(run main.cpp profiler.h profiler.cpp fluid_domain.h fluid_system.h fluid_system.cpp
-#   particle.h render_util.h utils.h render/camera.cpp render/input.cpp
-#   render/mesh.cpp render/object.cpp render/objectLoader.cpp render/renderer.cpp
-#   render/scene.cpp render/shader.cpp render/texture.cpp render/noise/perlin.cpp
-#   render/camera.h render/debug.h render/lights.h render/mesh.h render/object.h
-#   render/objectLoader.h render/renderer.h render/scene.h render/shader.h
-#   render/stb_image.h render/stb_image_write.h render/texture.h
-#   render/tiny_obj_loader.h render/noise/perlin.h )
-
-# cuda_add_executable(run_df divergence_free.cpp sph_render_util.h sph_common.h
-#   sph_gpu.h sph_gpu.cpp sph_math.h ${RENDER_SRC})
-
 add_executable(run main_gpu.cpp sph_common.h sph_gpu.h sph_math.h gpu_render_util.h ${RENDER_SRC} sph.cuh sph.cu marching_cube_table.h profiler.h profiler.cpp)
 
-
-add_executable(run_test test/entry.cpp test/cuda.cpp sph_common.h sph_cpu.h
-  sph_cpu.cpp sph.cuh sph.cu marching_cube_table.h)
-
-
 target_link_libraries(run ${CUDA_LIBRARIES} ${OPENGL_LIBRARY} glfw ${GLEW_LIBRARY} assimp pthread optix)
-target_link_libraries(run_test ${CUDA_LIBRARIES} ${Boost_LIBRARIES})
 
 file(GLOB_RECURSE PTX_SRC "cuda/*.cu")
 

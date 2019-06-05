@@ -37,6 +37,6 @@ void print_summary();
 
 void update_grid_corners();
 
-void update_faces(float* vbo, int* h_total_num_faces);
+void update_faces(float* vbo, int* h_total_num_faces, int max_num_faces);
 } // namespace mc
 }

@@ -1,12 +1,12 @@
 #pragma once
-#include "sph_gpu.h"
 #include "render/optix_renderer.h"
 #include "render/scene.h"
+#include "scene_util.h"
+#include "sph.cuh"
+#include "sph_gpu.h"
+#include <cuda_gl_interop.h>
 #include <glm/gtx/compatibility.hpp>
 #include <iostream>
-#include "sph.cuh"
-#include "scene_util.h"
-#include <cuda_gl_interop.h>
 
 #define N_THREADS 1024
 #define CUDA_CHECK_RETURN(value)                                               \
@@ -19,7 +19,10 @@
     }                                                                          \
   }
 
+
 class RaytraceUtil {
+  static constexpr int MAX_FACES = 1000000;
+
 public:
   std::shared_ptr<Scene> scene;
   std::shared_ptr<Object> fluidObj;
@@ -46,15 +49,19 @@ public:
     // auto test_obj = NewSphere();
     // test_obj->material.kd = {1,1,1};
     // scene->addObject(test_obj);
-    // test_obj->position = system->fluid_domain.corner + system->fluid_domain.size / 2.f;
-    // test_obj->scale = system->fluid_domain.size / 2.f;
+    // test_obj->position = system->fluid_domain.corner +
+    // system->fluid_domain.size / 2.f; test_obj->scale =
+    // system->fluid_domain.size / 2.f;
 
     int mc_num_cells = system->get_mc_num_cells();
 
+    printf("%d\n", std::min(mc_num_cells * 15, MAX_FACES * 3));
     // TODO: maybe optimize using EBO?
     // each cell can have 5 faces (15 vertices)
-    std::shared_ptr<DynamicMesh> mesh = std::make_shared<DynamicMesh>(mc_num_cells * 15);
-    CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(&resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
+    std::shared_ptr<DynamicMesh> mesh = std::make_shared<DynamicMesh>(
+        std::min(mc_num_cells * 15, MAX_FACES * 3));
+    CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
+        &resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
 
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
@@ -76,9 +83,7 @@ public:
     glEnable(GL_FRAMEBUFFER_SRGB_EXT);
   }
 
-  void invalidate_camera() {
-    renderer->invalidateCamera();
-  }
+  void invalidate_camera() { renderer->invalidateCamera(); }
 
   void render() {
     renderer->renderScene(scene);
@@ -86,15 +91,17 @@ public:
     float *d_vertex_pointer;
     size_t size;
     CUDA_CHECK_RETURN(cudaGraphicsMapResources(1, &resource));
-    CUDA_CHECK_RETURN(cudaGraphicsResourceGetMappedPointer((void**)&d_vertex_pointer, &size, resource));
+    CUDA_CHECK_RETURN(cudaGraphicsResourceGetMappedPointer(
+        (void **)&d_vertex_pointer, &size, resource));
     int num_faces = 0;
     fluid_system->update_mesh();
-    fluid_system->update_faces(d_vertex_pointer, &num_faces);
-    std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())->setVertexCount(num_faces * 3);
+    fluid_system->update_faces(d_vertex_pointer, &num_faces, MAX_FACES);
+    std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())
+        ->setVertexCount(num_faces * 3);
     CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
   }
 
-  void renderToFile(const std::string& dir, uint32_t i = 0) {
+  void renderToFile(const std::string &dir, uint32_t i = 0) {
     renderer->renderCurrentToFile(dir + "/sph_" + std::to_string(i) + ".png");
   }
 };

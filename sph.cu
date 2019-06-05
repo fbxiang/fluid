@@ -301,8 +301,8 @@ float update_dt_by_CFL_pred() {
   _velocity_to_speed<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(d_tmp_float, d_velocities_pred, num_particles);
   thrust::device_ptr<float> speed_ptr = thrust::device_pointer_cast(d_tmp_float);
   float max_speed = *thrust::max_element(speed_ptr, speed_ptr + num_particles);
-  float dt = 0.2 * h_params.particle_size / max_speed;
-  if (dt > 0.003) dt = 0.003;
+  float dt = 1 * h_params.particle_size / max_speed;
+  if (dt > 0.01) dt = 0.01;
   if (dt < 0.00005) dt = 0.00005;
   cudaMemcpyToSymbol(sph::dt, &dt, sizeof(float));
   return dt;
@@ -1115,10 +1115,17 @@ __global__ void _update_faces(int n) {
 }
 
 __device__ int total_num_faces;
-__global__ void _transfer_faces_to_vbo(int n, float* vbo) {
+__global__ void _transfer_faces_to_vbo(int n, float* vbo, int max_num_faces) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
     int j = 0;
+    if (grid_face_idx[i] + num_faces[i] >= max_num_faces) {
+      if (grid_face_idx[i] < max_num_faces) {
+        // printf("Warning too many faces!\n");
+        total_num_faces = grid_face_idx[i];
+      }
+      return;
+    }
     for (int t = 0; t < num_faces[i]; ++t) {
       glm::vec3 v1 = faces[15 * i + 3 * t    ];
       glm::vec3 v2 = faces[15 * i + 3 * t + 1];
@@ -1163,7 +1170,7 @@ __global__ void _transfer_faces_to_vbo(int n, float* vbo) {
   }
 }
 
-void update_faces(float* vbo, int* h_total_num_faces) {
+void update_faces(float* vbo, int* h_total_num_faces, int max_num_faces) {
   int total_num_cells = h_grid_size.x * h_grid_size.y * h_grid_size.z;
   _update_faces<<<(total_num_cells + 512 - 1) / 512, 512>>>(total_num_cells);
 
@@ -1172,7 +1179,7 @@ void update_faces(float* vbo, int* h_total_num_faces) {
   thrust::device_ptr<int> grid_face_idx_ptr = thrust::device_pointer_cast(d_grid_face_idx);
   thrust::exclusive_scan(num_faces_ptr, num_faces_ptr + total_num_cells, grid_face_idx_ptr);
 
-  _transfer_faces_to_vbo<<<(total_num_cells + N_THREADS - 1) / N_THREADS, N_THREADS>>>(total_num_cells, vbo);
+  _transfer_faces_to_vbo<<<(total_num_cells + N_THREADS - 1) / N_THREADS, N_THREADS>>>(total_num_cells, vbo, max_num_faces);
   CUDA_CHECK_RETURN(cudaMemcpyFromSymbol(h_total_num_faces, mc::total_num_faces, sizeof(int)));
 }
 
