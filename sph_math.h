@@ -37,3 +37,10 @@ __device__ __host__ __forceinline__ glm::vec3 dw_ij(glm::vec3 pos1, glm::vec3 po
   }
   return d * (1.f / (h * h * h * h) * dkernel(q) / r);
 }
+
+__device__ __host__ __forceinline__ float kernel2(float q) {
+  if (q < 2) {
+    return (2 - q) / 2;
+  }
+  return 0;
+};

@@ -67,24 +67,18 @@ glm::vec3 *d_non_pressure_force;
 __device__ glm::vec3 *pressure_force;  // used in PCISPH
 glm::vec3 *d_pressure_force;
 
-/**** DF solver ****/
-
-__device__ float *rho_pred;
-float *d_rho_pred;
-
-__device__ float *alpha;
-float *d_alpha;
-
-__device__ float *kappa;
-float *d_kappa;
-
-__device__ float *kappa_v;
-float *d_kappa_v;
-
-/**** End DF solver ***/
-
-
 __device__ float dt;
+
+__device__ glm::vec3 *color_grad;  // particle normal
+glm::vec3 *d_color_grad;
+
+__device__ float *air_potential;
+float *d_air_potential;
+
+__device__ glm::vec3 *visual_debug;
+glm::vec3 *d_visual_debug;
+
+
 
 int max_num_particles;
 int num_particles;
@@ -94,49 +88,9 @@ void cuda_clear(void* d_field, size_t elem_size) {
   cudaMemset(d_field, 0, num_particles * elem_size);
 }
 
-// // Code from Jeroen Baert
-// __device__ uint64_t splitBy3(unsigned int a) {
-//   uint64_t x = a & 0x1fffff;
-//   x = (x | x << 32) & 0x1f00000000ffff;
-//   x = (x | x << 16) & 0x1f0000ff0000ff;
-//   x = (x | x << 8) & 0x100f00f00f00f00f;
-//   x = (x | x << 4) & 0x10c30c30c30c30c3;
-//   x = (x | x << 2) & 0x1249249249249249;
-//   return x;
-// }
-
-// __device__ uint64_t mortonEncode_magicbits(uint32_t x, uint32_t y, uint32_t
-// z) {
-//   uint64_t answer = 0;
-//   answer |= splitBy3(x) | splitBy3(y) << 1 | splitBy3(z) << 2;
-//   return answer;
-// }
-
-// __device__ uint64_t zorder2number(glm::uvec3 n) {
-//   return mortonEncode_magicbits(n.x, n.y, n.z);
-// }
-
-// __device__ __forceinline__ glm::uvec3 space2grid(glm::vec3 point) {
-//   return (point - domain.corner) / params.particle_size;
-// }
-
-// __device__ __forceinline__ uint32_t space2idx(glm::vec3 point) {
-//   return zorder2number(space2grid(point));
-// }
-
-// /* store grid number for ith particle
-//  * cell_idx[i]: cell number for particle i
-//  * bin_counts[n]: number of particles in cell n
-//  */
-// __global__ void update_cell_idx(uint32_t *cell_idx, uint32_t *bin_counts,
-//                                 glm::vec3 *positions, size_t n) {
-//   uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-//   if (i < n) {
-//     uint32_t grid = space2idx(positions[i]);
-//     cell_idx[i] = grid;
-//     atomicAdd(&bin_counts[grid], 1);
-//   }
-// }
+__device__ float psi(float I, float tau_min, float tau_max) {
+  return (min(I, tau_max) - min(I, tau_min)) / (tau_max - tau_min);
+}
 
 #define FOR_NEIGHBORS(...)                                                     \
   {                                                                            \
@@ -301,7 +255,7 @@ float update_dt_by_CFL_pred() {
   _velocity_to_speed<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(d_tmp_float, d_velocities_pred, num_particles);
   thrust::device_ptr<float> speed_ptr = thrust::device_pointer_cast(d_tmp_float);
   float max_speed = *thrust::max_element(speed_ptr, speed_ptr + num_particles);
-  float dt = 1 * h_params.particle_size / max_speed;
+  float dt = 0.4 * h_params.particle_size / max_speed;
   if (dt > 0.01) dt = 0.01;
   if (dt < 0.00005) dt = 0.00005;
   cudaMemcpyToSymbol(sph::dt, &dt, sizeof(float));
@@ -365,27 +319,6 @@ void update_pressure_force() {
   _update_pressure_force<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
 }
 
-
-// DF solver
-__global__ void _update_factor(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    glm::vec3 vacc = {0, 0, 0};
-    float sacc = 0;
-    FOR_NEIGHBORS(
-      if (i == j) continue;
-      glm::vec3 dw = dw_ij(positions[i], positions[j], params.particle_size);
-      glm::vec3 s = params.particle_mass * dw;
-      vacc += s;
-      sacc += glm::dot(s, s);
-                 );
-    alpha[i] = rho[i] / (glm::dot(vacc, vacc) + sacc);
-  }
-}
-void update_factor() {
-  _update_factor<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-}
-
 __global__ void _update_pressure(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
@@ -444,11 +377,63 @@ __global__ void _update_velocity_position(int n) {
     }
   }
 }
-void update_velocity_position() {
-  _update_velocity_position<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+
+__global__ void _update_color_grad(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    glm::vec3 value;
+    FOR_NEIGHBORS(
+        if (i == j) continue;
+        value += params.particle_mass / rho[j] * dw_ij(positions[i], positions[j], params.particle_size);
+                  );
+    color_grad[i] = value;
+  }
 }
 
-// DF solver
+__global__ void _update_visual(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float v_diff = 0;
+    float curvature = 0;
+    glm::vec3 ni = glm::normalize(color_grad[i]);
+    FOR_NEIGHBORS(
+        if (i == j) continue;
+        // v_diff
+        glm::vec3 vij = velocities[i]-velocities[j];
+        glm::vec3 xij = positions[i]-positions[j];
+        float kn = kernel2(glm::length(xij) / params.particle_size);
+        if (glm::length(vij) > 1e-6 && glm::length(xij) > 1e-6) {
+          v_diff += glm::length(vij) * (1 - glm::dot(glm::normalize(vij), glm::normalize(xij))) * kn;
+        }
+
+        glm::vec3 nj = glm::normalize(color_grad[j]);
+        curvature += (1 - glm::dot(ni, nj)) * kn * (glm::dot(xij, ni) > 0);
+                  );
+    glm::vec3 normal = glm::normalize(color_grad[i]);
+    glm::vec3 vel_dir = glm::normalize(velocities[i]);
+    bool crest = glm::length(color_grad[i]) > 10 && glm::dot(normal, vel_dir) > 0.6;
+
+    float energy = glm::dot(velocities[i], velocities[i]);
+
+    // v_diff
+    float Ita = psi(v_diff, 10, 50);
+    // curvature * crest
+    float Iwc = psi(curvature * crest, 2, 8);
+    // energy
+    float Ik = psi(energy, 0, 1);
+    float potential = Ik * (3 * Ita + Iwc) * dt;
+    air_potential[i] = potential;
+
+    visual_debug[i] = glm::vec3(1, 1-potential, 1-potential);
+  }
+}
+
+void update_velocity_position() {
+  _update_velocity_position<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+  _update_color_grad<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+  _update_visual<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+}
+
 __global__ void _update_non_pressure_forces(int n) {
   float E = 0.01;
   float F = 0.1;
@@ -524,25 +509,6 @@ void update_positions() {
   _update_positions<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
 }
 
-__global__ void _update_factors(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    glm::vec3 vacc = {0,0,0};
-    float sacc = 0;
-    FOR_NEIGHBORS(
-      if (i == j) continue;
-      glm::vec3 dw = dw_ij(positions[i], positions[j], params.particle_size);
-      glm::vec3 s = params.particle_mass * dw;
-      vacc += s;
-      sacc += glm::dot(s, s);
-                  );
-    alpha[i] = rho[i] / (glm::dot(vacc, vacc) + sacc);
-  }
-}
-void update_factors() {
-  _update_factors<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-}
-
 __global__ void _update_velocity_pred(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
@@ -592,110 +558,10 @@ void update_velocity_position_pred() {
   _update_velocity_position_pred<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
 }
 
-
-__global__ void _correct_density_error_pass1(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    float DrhoDt = -rho[i] * divergence(velocities_pred, i);
-    rho_pred[i] = rho[i] + dt * DrhoDt; // predict density
-    kappa[i] = (rho_pred[i] - params.rest_density) / (dt * dt) * alpha[i];
-  }
-}
-__global__ void _correct_density_error_pass2(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    glm::vec3 acc = {0, 0, 0};
-    FOR_NEIGHBORS(
-        if (i == j) continue;
-        acc += params.particle_mass * (kappa[i] / rho[i] + kappa[j] / rho[j]) *
-        dw_ij(positions[i], positions[j], params.particle_size););
-    velocities_pred[i] -= 0.1f * dt * acc;
-  }
-}
-void correct_density_error() {
-  int iter = 0;
-  float avg = 0.f;
-  do {
-    _correct_density_error_pass1<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-    _correct_density_error_pass2<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-    thrust::device_ptr<float> rho_pred_ptr = thrust::device_pointer_cast(d_rho_pred);
-    float sum = thrust::reduce(rho_pred_ptr, rho_pred_ptr + num_particles, (float)0, thrust::plus<float>());
-    avg = sum / (float)num_particles;
-
-    printf("Average density %d: %f\n", iter, avg);
-    ++iter;
-  } while ((iter < 2) || (avg - h_params.rest_density) > 10);
-  // TODO: debug message here
-}
-
-
-__global__ void _correct_divergence_error_pass1(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    float DrhoDt = -rho[i] * divergence(velocities_pred, i);
-    kappa_v[i] = 1.f / dt * DrhoDt * alpha[i];
-    tmp_float[i] = DrhoDt;  // cache DrhoDt
-  }
-}
-__global__ void _correct_divergence_error_pass2(int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    glm::vec3 acc = {0, 0, 0};
-
-    FOR_NEIGHBORS(
-        if (i == j) continue;
-        acc += params.particle_mass * (kappa_v[i] / rho[i] + kappa_v[j] / rho[j]) *
-        dw_ij(positions[i], positions[j], params.particle_size);
-                 );
-    // velocities_pred[i] -= 0.2f * dt * acc;
-    velocities_pred[i] = 0.2f * dt * acc;
-  }
-}
-void correct_divergence_error() {
-  int iter = 0;
-  float avg = 0.f;
-  do {
-    _correct_divergence_error_pass1<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-    _correct_divergence_error_pass2<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
-
-    thrust::device_ptr<float> tmp_ptr = thrust::device_pointer_cast(d_tmp_float);
-    float sum = thrust::reduce(tmp_ptr, tmp_ptr + num_particles, (float)0, thrust::plus<float>());
-    avg = sum / (float)num_particles;
-
-    printf("Average DrhoDt %d: %f\n", iter, avg);
-    ++iter;
-  } while (avg > 10 || avg < -10); // 10 iterations max?
-  // TODO: debug message here
-}
-
 void update_velocity() {
   cudaMemcpy(d_velocities, d_velocities_pred,
              num_particles * sizeof(glm::vec3),
              cudaMemcpyDeviceToDevice);
-}
-
-void df_init() {
-  update_neighbors();
-  update_density();
-  update_factor();
-}
-
-float df_step() {
-  update_non_pressure_forces();
-  float dt = update_dt_by_CFL();
-  update_velocity_pred();
-
-  correct_density_error();
-  update_positions();
-
-  update_neighbors();
-  update_density();
-  update_factors();
-
-  correct_divergence_error();
-  update_velocity();
-
-  return dt;
 }
 
 float step_regular() {
@@ -735,6 +601,24 @@ float pci_step() {
   update_velocity_position();
 
   return dt;
+}
+
+__global__ void _update_debug_points(float* vbo, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (i < n) {
+    vbo[6 * i    ] = positions[i].x;
+    vbo[6 * i + 1] = positions[i].y;
+    vbo[6 * i + 2] = positions[i].z;
+
+    vbo[6 * i + 3] = visual_debug[i].x;
+    vbo[6 * i + 4] = visual_debug[i].y;
+    vbo[6 * i + 5] = visual_debug[i].z;
+  }
+}
+
+void update_debug_points(float* vbo) {
+  _update_debug_points<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(vbo, num_particles);
 }
 
 
@@ -809,23 +693,6 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::pressure, &d_pressure, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 
-  // DF Solver
-  CUDA_CHECK_RETURN(cudaMalloc(&d_rho_pred, max_num_particles * sizeof(float)));
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::rho_pred, &d_rho_pred, sizeof(void *), 0,
-                                       cudaMemcpyHostToDevice));
-
-  CUDA_CHECK_RETURN(cudaMalloc(&d_alpha, max_num_particles * sizeof(float)));
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::alpha, &d_alpha, sizeof(void *), 0,
-                                       cudaMemcpyHostToDevice));
-
-  CUDA_CHECK_RETURN(cudaMalloc(&d_kappa, max_num_particles * sizeof(float)));
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa, &d_kappa, sizeof(void *), 0,
-                                       cudaMemcpyHostToDevice));
-
-  CUDA_CHECK_RETURN(cudaMalloc(&d_kappa_v, max_num_particles * sizeof(float)));
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::kappa_v, &d_kappa_v, sizeof(void *), 0,
-                                       cudaMemcpyHostToDevice));
-
   CUDA_CHECK_RETURN(cudaMalloc(&d_velocities_pred, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::velocities_pred, &d_velocities_pred, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
@@ -833,6 +700,19 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
   CUDA_CHECK_RETURN(cudaMalloc(&d_positions_pred, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::positions_pred, &d_positions_pred, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_color_grad, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::color_grad, &d_color_grad, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_air_potential, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::air_potential, &d_air_potential, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&d_visual_debug, max_num_particles * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::visual_debug, &d_visual_debug, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
 }
 
 int get_num_particles() {
@@ -893,6 +773,59 @@ void print_summary() {
   log("Grid size", h_grid_size);
   log("Number of cells", num_cells);
   log();
+}
+
+
+namespace visual {
+
+__device__ glm::vec3 *positions;
+glm::vec3 *d_positions;
+
+__device__ glm::vec3 *velocities;
+glm::vec3 *d_velocities;
+
+__device__ float *life;
+float *d_life;
+
+__constant__ int max_visual = 100000;
+__device__ int visual_count = 0;
+
+__device__ void add_particle(glm::vec3 position, glm::vec3 velocity) {
+  int idx = atomicAdd(&visual_count, 1);
+  if (visual_count > max_visual) {
+    atomicAdd(&visual_count, -1);
+    return;
+  }
+  positions[idx] = position;
+  velocities[idx] = velocity;
+}
+__global__ void add_particles(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    if (air_potential[i]) {
+    }
+  }
+}
+void add_particles() {
+}
+
+struct _positive_pred : public thrust::unary_function<float,bool>
+{
+  __host__ __device__ float operator()(float x) { return x > 0; }
+};
+
+void clear_particle() {
+  int h_visual_count = 0;
+  CUDA_CHECK_RETURN(cudaMemcpyFromSymbol(&h_visual_count, visual::visual_count, sizeof(int)));
+
+  thrust::device_ptr<glm::vec3> positions_ptr = thrust::device_pointer_cast(d_positions);
+  thrust::device_ptr<glm::vec3> velocities_ptr = thrust::device_pointer_cast(d_velocities);
+  thrust::device_ptr<float> life_ptr = thrust::device_pointer_cast(d_life);
+  int new_count = thrust::remove_if(positions_ptr, positions_ptr + h_visual_count, life_ptr, _positive_pred()) - positions_ptr;
+  thrust::remove_if(velocities_ptr, velocities_ptr + h_visual_count, life_ptr, _positive_pred());
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::visual_count, &new_count, sizeof(int)));
+}
+
 }
 
 namespace mc {

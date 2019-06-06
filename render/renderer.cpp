@@ -8,9 +8,6 @@ void Renderer::init() {
                              "/home/fx/glsl-files/gbuffer.fsh");
   deferredShader = new Shader("/home/fx/glsl-files/deferred.vsh",
                               "/home/fx/glsl-files/deferred.fsh");
-  skyboxShader = new Shader("/home/fx/glsl-files/skybox.vsh",
-                            "/home/fx/glsl-files/skybox.fsh");
-
   glEnable(GL_FRAMEBUFFER_SRGB_EXT);
   initGbufferFramebuffer();
   initColortex();
@@ -34,8 +31,6 @@ void Renderer::exit() {
   gbufferShader = nullptr;
   delete deferredShader;
   deferredShader = nullptr;
-  delete skyboxShader;
-  skyboxShader = nullptr;
 }
 
 void Renderer::resize(GLuint w, GLuint h) {
@@ -158,17 +153,6 @@ void Renderer::gbufferPass(std::shared_ptr<Scene> scene, GLuint fbo) {
 
   glm::mat4 viewMat = scene->getMainCamera()->getViewMat();
   glm::mat4 projMat = scene->getMainCamera()->getProjectionMat();
-
-  // TODO: debug environment map
-  if (auto envmap = scene->getEnvironmentMap()) {
-    glDepthMask(GL_FALSE);
-    skyboxShader->use();
-    skyboxShader->setMatrix("gbufferViewMatrix", viewMat);
-    skyboxShader->setMatrix("gbufferProjectionMatrix", projMat);
-    skyboxShader->setTexture("skybox", envmap->getId(), 0);
-    envCube->getMesh()->draw();
-    glDepthMask(GL_TRUE);
-  }
 
   gbufferShader->use();
   gbufferShader->setMatrix("gbufferViewMatrix", viewMat);

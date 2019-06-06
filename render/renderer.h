@@ -23,7 +23,6 @@ class Renderer {
  private:
   Shader* gbufferShader;
   Shader* deferredShader;
-  Shader* skyboxShader;
 
  protected:
   GLuint width, height;

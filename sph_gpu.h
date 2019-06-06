@@ -73,20 +73,6 @@ public:
 };
 
 
-class SPH_GPU_DF : public SPH_GPU {
- public:
-  using SPH_GPU::SPH_GPU;
-
-  void sim_init() {
-    sph::df_init();
-  }
-
-  float step() {
-    return sph::df_step();
-  }
-};
-
-
 class SPH_GPU_PCI : public SPH_GPU {
  public:
   using SPH_GPU::SPH_GPU;

@@ -156,30 +156,39 @@ void LineMesh::draw() const {
   glDrawElements(GL_LINES, getIndices().size(), GL_UNSIGNED_INT, 0);
 }
 
-DynamicMesh::DynamicMesh(int maxvcount)
+AbstractDynamicMesh::AbstractDynamicMesh(int maxvcount)
     : vertexCount(0), maxVertexCount(maxvcount) {
-
   glGenVertexArrays(1, &vao);
   glBindVertexArray(vao);
   glGenBuffers(1, &vbo);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
+}
 
+AbstractDynamicMesh::~AbstractDynamicMesh() {
+  if (vbo)
+    glDeleteBuffers(1, &vbo);
+  if (vao)
+    glDeleteVertexArrays(1, &vao);
+}
+
+void AbstractDynamicMesh::setVertexCount(int vcount) {
+  vertexCount = std::max(std::min(vcount, maxVertexCount) / 3 * 3, 0);
+}
+
+int AbstractDynamicMesh::getVertexCount() const { return vertexCount; }
+
+int AbstractDynamicMesh::getMaxVertexCount() const { return maxVertexCount; }
+
+DynamicMesh::DynamicMesh(int maxvcount) : AbstractDynamicMesh(maxvcount) {
   glBufferData(GL_ARRAY_BUFFER, maxVertexCount * 6 * sizeof(float), NULL,
                GL_DYNAMIC_DRAW);
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
 
   glEnableVertexAttribArray(1);
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
-
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                        (void *)(3 * sizeof(float)));
   glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-DynamicMesh::~DynamicMesh() {
-  if (vbo)
-    glDeleteBuffers(1, &vbo);
-  if (vao)
-    glDeleteVertexArrays(1, &vao);
 }
 
 void DynamicMesh::draw() const {
@@ -187,14 +196,22 @@ void DynamicMesh::draw() const {
   glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 }
 
-void DynamicMesh::setVertexCount(int vcount) {
-  vertexCount = std::max(std::min(vcount, maxVertexCount) / 3 * 3, 0);
+DynamicPointMesh::DynamicPointMesh(int maxvcount)
+    : AbstractDynamicMesh(maxvcount) {
+  glBufferData(GL_ARRAY_BUFFER, maxVertexCount * 6 * sizeof(float), NULL,
+               GL_DYNAMIC_DRAW);
+  // position
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+
+  // color
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                        (void *)(3 * sizeof(float)));
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-int DynamicMesh::getVertexCount() const {
-  return vertexCount;
-}
-
-int DynamicMesh::getMaxVertexCount() const {
-  return maxVertexCount;
+void DynamicPointMesh::draw() const {
+  glBindVertexArray(getVAO());
+  glDrawArrays(GL_POINTS, 0, vertexCount);
 }

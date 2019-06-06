@@ -19,13 +19,12 @@ void print_summary();
 void update_neighbors();
 float step_regular();
 
-void df_init();
-float df_step();
-
 float pci_step();
 
 void update_density();
 void update_factor();
+
+void update_debug_points(float* vbo);
 
 namespace mc {
 

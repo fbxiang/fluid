@@ -81,6 +81,10 @@ void init(uint32_t width, uint32_t height) {
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LESS);
 
+  glEnable(GL_PROGRAM_POINT_SIZE);
+  glEnable(GL_POINT_SMOOTH);
+  glPointSize(5);
+
   const GLubyte *glrenderer = glGetString(GL_RENDERER);
   const GLubyte *version = glGetString(GL_VERSION);
   fprintf(stdout, "Renderer: %s\n", glrenderer);
@@ -122,8 +126,9 @@ std::vector<glm::vec3> fill_prism(glm::vec3 corner, glm::vec3 size,
 }
 
 int main() {
-  float h = 0.02;
+  float h = 0.015;
   SPH_GPU_PCI fs(h);
+  // fs.solver_params.viscosity = 0.01;
 
   fs.set_domain({-0.814, 0.028, -0.5}, {1.37, 2, 0.85});
   fs.cuda_init();
@@ -137,7 +142,7 @@ int main() {
   init(W, H);
 
   // RaytraceUtil ru(&fs, W, H);
-  RaytraceUtil ru(&fs, W, H);
+  GPURenderUtil ru(&fs, W, H);
   // ru.renderer->debug = 3;
 
   fs.sim_init();
