@@ -26,7 +26,10 @@ class RaytraceUtil {
 public:
   std::shared_ptr<Scene> scene;
   std::shared_ptr<Object> fluidObj;
+  std::shared_ptr<Object> diffuseObj;
+
   cudaGraphicsResource_t resource = 0;
+  cudaGraphicsResource_t diffuseResource = 0;
 
   OptixRenderer *renderer;
   SPH_GPU *fluid_system;
@@ -36,22 +39,8 @@ public:
     fluid_system = system;
     scene = std::make_shared<Scene>();
     setupSponza(scene, width, height);
-    glm::vec3 size = system->fluid_domain.size;
-    glm::vec3 center = system->fluid_domain.corner + size * .5f;
-
-    // scene->setEnvironmentMap("../assets/ame_desert/desertsky_ft.tga",
-    //                          "../assets/ame_desert/desertsky_bk.tga",
-    //                          "../assets/ame_desert/desertsky_up.tga",
-    //                          "../assets/ame_desert/desertsky_dn.tga",
-    //                          "../assets/ame_desert/desertsky_lf.tga",
-    //                          "../assets/ame_desert/desertsky_rt.tga");
-
-    // auto test_obj = NewSphere();
-    // test_obj->material.kd = {1,1,1};
-    // scene->addObject(test_obj);
-    // test_obj->position = system->fluid_domain.corner +
-    // system->fluid_domain.size / 2.f; test_obj->scale =
-    // system->fluid_domain.size / 2.f;
+    // glm::vec3 size = system->fluid_domain.size;
+    // glm::vec3 center = system->fluid_domain.corner + size * .5f;
 
     int mc_num_cells = system->get_mc_num_cells();
 
@@ -63,17 +52,26 @@ public:
     CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
         &resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
 
+    std::shared_ptr<DynamicMesh> diffuseMesh =
+        std::make_shared<DynamicMesh>(100000 * 12);
+    CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
+        &diffuseResource, diffuseMesh->getVBO(), cudaGraphicsRegisterFlagsNone));
+
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
     fluidObj->material.type = "transparent";
-    // fluidObj->material.type = "mirror";
+    fluidObj->material.kd = {0.8, 0.9, 1.0};
     scene->addObject(fluidObj);
+
+    diffuseObj = NewObject<Object>(diffuseMesh);
+    diffuseObj->name = "Diffuse";
+    diffuseObj->material.type = "foam";
+    diffuseObj->material.kd = { 1.0, 1.0, 1.0 };
+    scene->addObject(diffuseObj);
 
     size_t free, used;
     cudaMemGetInfo(&free, &used);
     printf("free: %ld; used: %ld\n", free, used);
-
-    fluidObj->material.kd = {0, 1, 1};
 
     scene->addDirectionalLight({glm::vec3(0, -1, -1), glm::vec3(1, 1, 0.5)});
     renderer = new OptixRenderer(width, height);
@@ -99,6 +97,17 @@ public:
     std::dynamic_pointer_cast<DynamicMesh>(fluidObj->getMesh())
         ->setVertexCount(num_faces * 3);
     CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
+
+    d_vertex_pointer = nullptr; size = 0;
+    CUDA_CHECK_RETURN(cudaGraphicsMapResources(1, &diffuseResource));
+    CUDA_CHECK_RETURN(cudaGraphicsResourceGetMappedPointer(
+        (void **)&d_vertex_pointer, &size, diffuseResource));
+
+    sph::visual::update_visual_faces(d_vertex_pointer);
+    std::dynamic_pointer_cast<DynamicMesh>(diffuseObj->getMesh())
+        ->setVertexCount(sph::visual::get_num_visual_particles() * 12);
+
+    CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &diffuseResource));
   }
 
   void renderToFile(const std::string &dir, uint32_t i = 0) {

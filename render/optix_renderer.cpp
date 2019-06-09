@@ -111,7 +111,7 @@ void OptixRenderer::initSceneLights(std::shared_ptr<Scene> scene) {
   lBuffer->setElementSize(sizeof(DirectionalLight));
   lBuffer->setSize(scene->getDirectionalLights().size());
   DirectionalLight* dls = (DirectionalLight*) lBuffer->map();
-  for (int i = 0; i < scene->getDirectionalLights().size(); i++) {
+  for (uint32_t i = 0; i < scene->getDirectionalLights().size(); i++) {
     dls[i] = scene->getDirectionalLights()[i];
   }
   lBuffer->unmap();
@@ -122,7 +122,7 @@ void OptixRenderer::initSceneLights(std::shared_ptr<Scene> scene) {
   lBuffer->setElementSize(sizeof(PointLight));
   lBuffer->setSize(scene->getPointLights().size());
   PointLight* pls = (PointLight*) lBuffer->map();
-  for (int i = 0; i < scene->getPointLights().size(); i++) {
+  for (uint32_t i = 0; i < scene->getPointLights().size(); i++) {
     pls[i] = scene->getPointLights()[i];
   }
   lBuffer->unmap();
@@ -133,7 +133,7 @@ void OptixRenderer::initSceneLights(std::shared_ptr<Scene> scene) {
   lBuffer->setElementSize(sizeof(ParallelogramLight));
   lBuffer->setSize(scene->getParallelogramLights().size());
   ParallelogramLight* als = (ParallelogramLight*) lBuffer->map();
-  for (int i = 0; i < scene->getParallelogramLights().size(); i++) {
+  for (uint32_t i = 0; i < scene->getParallelogramLights().size(); i++) {
     als[i] = scene->getParallelogramLights()[i];
   }
   lBuffer->unmap();
@@ -267,15 +267,33 @@ optix::Transform OptixRenderer::getObjectTransform(std::shared_ptr<Object> obj) 
       _material_mirror_any_hit =
           context->createProgramFromPTXFile(ptxFile, "any_hit");
     }
+    if (!_material_foam_closest_hit) {
+      std::string ptxFile = get_ptx_filename("material_foam");
+
+      _material_foam_closest_hit =
+          context->createProgramFromPTXFile(ptxFile, "closest_hit");
+      _material_foam_shadow_any_hit =
+          context->createProgramFromPTXFile(ptxFile, "shadow_any_hit");
+      _material_foam_any_hit =
+          context->createProgramFromPTXFile(ptxFile, "any_hit");
+    }
 
     if (obj->material.type == "transparent") {
       mat->setClosestHitProgram(0, _material_fluid_closest_hit);
       mat->setAnyHitProgram(0, _material_fluid_any_hit);
       mat->setAnyHitProgram(1, _material_fluid_shadow_any_hit);
+      mat["tint"]->setFloat(obj->material.kd.x, obj->material.kd.y,
+                            obj->material.kd.z);
     } else if (obj->material.type == "mirror") {
       mat->setClosestHitProgram(0, _material_mirror_closest_hit);
       mat->setAnyHitProgram(0, _material_mirror_any_hit);
       mat->setAnyHitProgram(1, _material_mirror_shadow_any_hit);
+    } else if (obj->material.type == "foam") {
+      mat->setClosestHitProgram(0, _material_foam_closest_hit);
+      mat->setAnyHitProgram(0, _material_foam_any_hit);
+      mat->setAnyHitProgram(1, _material_foam_shadow_any_hit);
+      mat["kd"]->setFloat(obj->material.kd.x, obj->material.kd.y,
+                          obj->material.kd.z);
     } else {
       mat->setClosestHitProgram(0, _material_closest_hit);
       mat->setAnyHitProgram(0, _material_any_hit);
@@ -361,13 +379,8 @@ optix::Geometry OptixRenderer::getMeshGeometry(std::shared_ptr<DynamicMesh> mesh
     vertices->setElementSize(sizeof(float) * 6);
     vertices->setSize(mesh->getMaxVertexCount());
 
-    // optix::Buffer indices = context->createBufferFromGLBO(RT_BUFFER_INPUT, mesh->getEBO());
-    // indices->setFormat(RT_FORMAT_UNSIGNED_INT3);
-    // indices->setSize(mesh->getIndices().size() / 3);
-
     g = context->createGeometry();
     g["vertex_buffer"]->setBuffer(vertices);
-    // g["index_buffer"]->setBuffer(indices);
     g->setPrimitiveCount(mesh->getVertexCount() / 3);
 
     if (!_dmesh_intersect) {

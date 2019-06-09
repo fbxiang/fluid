@@ -30,7 +30,9 @@ public:
   std::shared_ptr<Object> domain;
   std::vector<std::shared_ptr<Object>> particles;
   std::shared_ptr<Object> fluidObj;
+  std::shared_ptr<Object> visualObj;
   cudaGraphicsResource_t resource = 0;
+  cudaGraphicsResource_t visual_resource = 0;
 
   Renderer *renderer;
   SPH_GPU *fluid_system;
@@ -57,12 +59,21 @@ public:
     CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
         &resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
 
+    auto visual_mesh = std::make_shared<DynamicPointMesh>(100000);
+    CUDA_CHECK_RETURN(cudaGraphicsGLRegisterBuffer(
+        &visual_resource, mesh->getVBO(), cudaGraphicsRegisterFlagsNone));
+
     fluidObj = NewObject<Object>(mesh);
     fluidObj->name = "Fluid";
     scene->addObject(fluidObj);
 
-    fluidObj->shader = new Shader("/home/fx/glsl-files/point.vsh",
+    auto pointShader = new Shader("/home/fx/glsl-files/point.vsh",
                                   "/home/fx/glsl-files/point.fsh");
+    fluidObj->shader = pointShader;
+
+    visualObj = NewObject<Object>(visual_mesh);
+    scene->addObject(visualObj);
+    visualObj->shader = pointShader;
 
     renderer = new Renderer(width, height);
     renderer->init();
@@ -94,6 +105,16 @@ public:
     sph::update_debug_points(d_vertex_pointer);
 
     CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &resource));
+
+    CUDA_CHECK_RETURN(cudaGraphicsMapResources(1, &visual_resource));
+    CUDA_CHECK_RETURN(cudaGraphicsResourceGetMappedPointer(
+        (void **)&d_vertex_pointer, &size, visual_resource));
+
+    sph::visual::update_debug_points(d_vertex_pointer);
+    std::dynamic_pointer_cast<DynamicPointMesh>(visualObj->getMesh())
+        ->setVertexCount(sph::visual::get_num_visual_particles());
+
+    CUDA_CHECK_RETURN(cudaGraphicsUnmapResources(1, &visual_resource));
     renderer->renderScene(scene);
   }
 

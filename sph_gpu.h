@@ -37,6 +37,10 @@ public:
     sph::mc::init(solver_params.particle_size * .5f);
   }
 
+  void visual_particle_init() {
+    sph::visual::init();
+  }
+
   void sim_init() {}
 
   void add_particles(std::vector<glm::vec3>& positions) {

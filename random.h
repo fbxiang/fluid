@@ -29,8 +29,7 @@
 // adapted from the original random.h implementation
 
 #pragma once
-#include <cuda_runtime.h>
-
+#include <optixu/optixu_math_namespace.h>
 
 template<unsigned int N>
 static __host__ __device__ __inline__ unsigned int tea( unsigned int val0, unsigned int val1 )

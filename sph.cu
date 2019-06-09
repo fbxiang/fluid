@@ -3,6 +3,7 @@
 #include <thrust/scan.h>
 #include <thrust/reduce.h>
 #include "marching_cube_table.h"
+#include "random.h"
 #include "profiler.h"
 
 #define N_THREADS 1024
@@ -74,6 +75,9 @@ glm::vec3 *d_color_grad;
 
 __device__ float *air_potential;
 float *d_air_potential;
+
+__device__ float *air_energy;
+float *d_air_energy;
 
 __device__ glm::vec3 *visual_debug;
 glm::vec3 *d_visual_debug;
@@ -416,15 +420,17 @@ __global__ void _update_visual(int n) {
     float energy = glm::dot(velocities[i], velocities[i]);
 
     // v_diff
-    float Ita = psi(v_diff, 10, 50);
+    float Ita = psi(v_diff, 10, 40);
     // curvature * crest
     float Iwc = psi(curvature * crest, 2, 8);
     // energy
     float Ik = psi(energy, 0, 1);
-    float potential = Ik * (3 * Ita + Iwc) * dt;
+    float potential = Ik * (3000 * Ita + 1000 * Iwc) * dt;
     air_potential[i] = potential;
+    air_energy[i] = Ik;
 
-    visual_debug[i] = glm::vec3(1, 1-potential, 1-potential);
+    float test = potential / dt;
+    visual_debug[i] = glm::vec3(1, 1-test, 1-test);
   }
 }
 
@@ -593,7 +599,7 @@ float pci_step() {
   update_velocity_position_pred();
   float dt = update_dt_by_CFL_pred();
 
-  for (int iter = 0; iter < 3; ++iter) {
+  for (int iter = 0; iter < 5; ++iter) {
     update_density_increment_pressure();
     update_pressure_force();
     update_velocity_position_pred();
@@ -709,6 +715,11 @@ void init(const SolverParams &in_params, const FluidDomain &in_domain,
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::air_potential, &d_air_potential, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
 
+  CUDA_CHECK_RETURN(cudaMalloc(&d_air_energy, max_num_particles * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::air_energy, &d_air_energy, sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+
   CUDA_CHECK_RETURN(cudaMalloc(&d_visual_debug, max_num_particles * sizeof(glm::vec3)));
   CUDA_CHECK_RETURN(cudaMemcpyToSymbol(sph::visual_debug, &d_visual_debug, sizeof(void *), 0,
                                        cudaMemcpyHostToDevice));
@@ -778,6 +789,35 @@ void print_summary() {
 
 namespace visual {
 
+#define VISUAL_FOR_NEIGHBORS(...)                                              \
+  {                                                                            \
+    float c = params.cell_size;                                                \
+    glm::ivec3 gpos = pos2grid_pos(visual::positions[i]);                      \
+    for (int x = -1; x <= 1; ++x) {                                            \
+      if (x == -1 && gpos.x == 0 || x == 1 && gpos.x == grid_size.x - 1)       \
+        continue;                                                              \
+      for (int y = -1; y <= 1; ++y) {                                          \
+        if (y == -1 && gpos.y == 0 || y == 1 && gpos.y == grid_size.y - 1)     \
+          continue;                                                            \
+        for (int z = -1; z <= 1; ++z) {                                        \
+          if (z == -1 && gpos.z == 0 || z == 1 && gpos.z == grid_size.y - 1)   \
+            continue;                                                          \
+          int cell_idx = grid_pos2cell_idx(                                    \
+              glm::ivec3(gpos.x + x, gpos.y + y, gpos.z + z));                 \
+          for (int k = grid_start_idx[cell_idx], e = k + grid[cell_idx];       \
+               k < e; ++k) {                                                   \
+            int j = sorted_particle_idx[k];                                    \
+            glm::vec3 r = visual::positions[i] - sph::positions[j];            \
+            if (glm::dot(r, r) < c * c) {                                      \
+              __VA_ARGS__                                                      \
+            }                                                                  \
+          }                                                                    \
+        }                                                                      \
+      }                                                                        \
+    }                                                                          \
+  }
+
+
 __device__ glm::vec3 *positions;
 glm::vec3 *d_positions;
 
@@ -787,43 +827,257 @@ glm::vec3 *d_velocities;
 __device__ float *life;
 float *d_life;
 
-__constant__ int max_visual = 100000;
-__device__ int visual_count = 0;
+__device__ int *visual_types;
+int *d_visual_types;
 
-__device__ void add_particle(glm::vec3 position, glm::vec3 velocity) {
+__device__ unsigned int *rand_seeds;
+unsigned int *d_rand_seeds;
+
+__constant__ int max_visual = 100000;
+constexpr int h_max_visual = 100000;
+__device__ int visual_count = 0;
+int h_visual_count = 0;
+
+int get_num_visual_particles() {
+  return h_visual_count;
+}
+
+// Call add_particle on each fluid particle to add diffuse particle
+__device__ void add_visual_particle(glm::vec3 position, glm::vec3 velocity, float life) {
   int idx = atomicAdd(&visual_count, 1);
   if (visual_count > max_visual) {
     atomicAdd(&visual_count, -1);
     return;
   }
-  positions[idx] = position;
-  velocities[idx] = velocity;
+  visual::positions[idx] = position;
+  visual::velocities[idx] = velocity;
+  visual::life[idx] = life * 5 + rnd(rand_seeds[idx]) * 2;
 }
-__global__ void add_particles(int n) {
+__global__ void _add_visual_particles(int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
-    if (air_potential[i]) {
+    if (rnd(rand_seeds[i]) < sph::air_potential[i]) {
+      glm::vec3 p = sph::positions[i];
+      glm::vec3 v = sph::velocities[i];
+
+      glm::vec3 n = glm::normalize(v);
+      glm::vec3 e1, e2;
+      if (n.y < 0.9) {
+        e1 = glm::normalize(glm::cross(glm::vec3(0,1,0), n));
+        e2 = glm::cross(n, e1);
+      } else {
+        e1 = glm::normalize(glm::cross(glm::vec3(1,0,0), n));
+        e2 = glm::cross(n, e1);
+      }
+
+      float r = rnd(rand_seeds[i]) * params.particle_size / 2.f;
+      float h = rnd(rand_seeds[i]) * dt * glm::length(v);
+      float theta = rnd(rand_seeds[i]) * M_PIf * 2.f;
+
+      float dh = h;
+      float dx = r * cos(theta);
+      float dy = r * sin(theta);
+
+      add_visual_particle(p + dx * e1 + dy * e2 + dh * n, v + dx * e1 + dy * e2, air_energy[i]);
     }
   }
 }
-void add_particles() {
+
+void add_visual_particles() {
+  // add visual particles
+  _add_visual_particles<<<(num_particles + N_THREADS - 1) / N_THREADS, N_THREADS>>>(num_particles);
+
+  // update host visual count
+  CUDA_CHECK_RETURN(cudaMemcpyFromSymbol(&h_visual_count, visual_count, sizeof(int)));
 }
 
-struct _positive_pred : public thrust::unary_function<float,bool>
+__global__ void _update_visual_particles(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    glm::vec3 vf(0.f);
+    float weights = 0;
+    int count = 0;
+    VISUAL_FOR_NEIGHBORS(
+        ++count;
+        float kn = kernel(glm::length(visual::positions[i] - sph::positions[j])/params.particle_size);
+        weights += kn;
+        vf += sph::velocities[j] * kn;
+                         );
+    vf /= weights;
+    float kb = 0.2;
+    float kd = 0.8;
+
+    if (count < 12) {
+      // spray
+      visual_types[i] = 0;
+      velocities[i] += params.g * dt;
+    } else if (count > 35) {
+      // bubble
+      visual_types[i] = 1;
+      velocities[i] += (-kb * params.g + kd * (vf-velocities[i])/dt) * dt;
+    } else {
+      // foam
+      visual_types[i] = 2;
+      velocities[i] = vf;
+      life[i] -= dt;
+    }
+    positions[i] += velocities[i] * dt;
+
+    // force boundary
+    if (positions[i].x < domain.corner.x + params.eps) {
+      velocities[i].x = 0.f;
+      positions[i].x = domain.corner.x + params.eps;
+    }
+    if (positions[i].y < domain.corner.y + params.eps) {
+      velocities[i].y = 0.f;
+      positions[i].y = domain.corner.y + params.eps;
+    }
+    if (positions[i].z < domain.corner.z + params.eps) {
+      velocities[i].z = 0.f;
+      positions[i].z = domain.corner.z + params.eps;
+    }
+
+    if (positions[i].x >= domain.corner.x + domain.size.x - params.eps) {
+      velocities[i].x = 0.f;
+      positions[i].x = domain.corner.x + domain.size.x - params.eps;
+    }
+    if (positions[i].y >= domain.corner.y + domain.size.y - params.eps) {
+      velocities[i].y = 0.f;
+      positions[i].y = domain.corner.y + domain.size.y - params.eps;
+    }
+    if (positions[i].z >= domain.corner.z + domain.size.z - params.eps) {
+      velocities[i].z = 0.f;
+      positions[i].z = domain.corner.z + domain.size.z - params.eps;
+    }
+  }
+}
+void update_visual_particles() {
+  if (h_visual_count <= 0) return;
+  _update_visual_particles<<<(h_visual_count + N_THREADS - 1) / N_THREADS, N_THREADS>>>(h_visual_count);
+}
+
+__global__ void _init_rand_seeds(int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    rand_seeds[i] = tea<16>(i, 0);
+  }
+}
+
+struct _negative_pred : public thrust::unary_function<float,bool>
 {
-  __host__ __device__ float operator()(float x) { return x > 0; }
+  __host__ __device__ float operator()(float x) { return x <= 0; }
 };
 
-void clear_particle() {
-  int h_visual_count = 0;
-  CUDA_CHECK_RETURN(cudaMemcpyFromSymbol(&h_visual_count, visual::visual_count, sizeof(int)));
-
+void clear_visual_particles() {
   thrust::device_ptr<glm::vec3> positions_ptr = thrust::device_pointer_cast(d_positions);
   thrust::device_ptr<glm::vec3> velocities_ptr = thrust::device_pointer_cast(d_velocities);
   thrust::device_ptr<float> life_ptr = thrust::device_pointer_cast(d_life);
-  int new_count = thrust::remove_if(positions_ptr, positions_ptr + h_visual_count, life_ptr, _positive_pred()) - positions_ptr;
-  thrust::remove_if(velocities_ptr, velocities_ptr + h_visual_count, life_ptr, _positive_pred());
-  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::visual_count, &new_count, sizeof(int)));
+  if (h_visual_count > 0) {
+    int new_count = thrust::remove_if(positions_ptr, positions_ptr + h_visual_count,
+                                      life_ptr, _negative_pred()) - positions_ptr;
+    thrust::remove_if(velocities_ptr, velocities_ptr + h_visual_count, life_ptr, _negative_pred());
+    CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::visual_count, &new_count, sizeof(int)));
+    h_visual_count = new_count;
+  }
+}
+
+void visual_step() {
+  add_visual_particles();
+  update_visual_particles();
+  clear_visual_particles();
+}
+
+void init() {
+  CUDA_CHECK_RETURN(cudaMalloc(&visual::d_positions, h_max_visual * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::positions, &visual::d_positions,
+                                       sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&visual::d_velocities, h_max_visual * sizeof(glm::vec3)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::velocities, &visual::d_velocities,
+                                       sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&visual::d_life, h_max_visual * sizeof(float)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::life, &visual::d_life,
+                                       sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&visual::d_visual_types, h_max_visual * sizeof(int)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::visual_types, &visual::d_visual_types,
+                                       sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+
+  CUDA_CHECK_RETURN(cudaMalloc(&visual::d_rand_seeds, h_max_visual * sizeof(unsigned int)));
+  CUDA_CHECK_RETURN(cudaMemcpyToSymbol(visual::rand_seeds, &visual::d_rand_seeds,
+                                       sizeof(void *), 0,
+                                       cudaMemcpyHostToDevice));
+  _init_rand_seeds<<<(h_max_visual + N_THREADS - 1) / N_THREADS, N_THREADS>>>(h_max_visual);
+}
+
+__global__ void _update_debug_points(float* vbo, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (i < n) {
+    vbo[6 * i    ] = positions[i].x;
+    vbo[6 * i + 1] = positions[i].y;
+    vbo[6 * i + 2] = positions[i].z;
+
+    if (visual_types[i] == 0) {
+      vbo[6 * i + 3] = 1.f;
+      vbo[6 * i + 4] = 1.f; 
+      vbo[6 * i + 5] = 0.f;
+    } else if (visual_types[i] == 1) {
+      vbo[6 * i + 3] = 0.f;
+      vbo[6 * i + 4] = 0.f; 
+      vbo[6 * i + 5] = 1.f;
+    } else if (visual_types[i] == 2) {
+      vbo[6 * i + 3] = 1.f;
+      vbo[6 * i + 4] = 0.f; 
+      vbo[6 * i + 5] = 1.f;
+    }
+  }
+}
+void update_debug_points(float* vbo) {
+  if (h_visual_count <= 0) return;
+  _update_debug_points<<<(h_visual_count + N_THREADS - 1) / N_THREADS, N_THREADS>>>(vbo, h_visual_count);
+}
+
+
+__global__ void _update_visual_faces(float *vbo, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (i < n) {
+    float r = params.particle_size / 10;
+    glm::vec3 ns[4] = {
+      glm::normalize(glm::vec3(-1,1,-1)),
+      glm::normalize(glm::vec3(-1,-1,1)),
+      glm::normalize(glm::vec3(1,-1,-1)),
+      glm::normalize(glm::vec3(1,1,1))
+    };
+    glm::vec3 vs[4] = {
+      positions[i] + ns[1] * r,
+      positions[i] + ns[2] * r,
+      positions[i] + ns[3] * r,
+      positions[i] + ns[4] * r
+    };
+    int arr[] = {0,2,1, 0,1,3, 0,3,2, 1,2,3};
+    int j = 72 * i;
+    for (int idx = 0; idx < 12; ++idx) {
+      vbo[j++] = vs[arr[idx]].x;
+      vbo[j++] = vs[arr[idx]].y;
+      vbo[j++] = vs[arr[idx]].z;
+
+      vbo[j++] = ns[arr[idx]].x;
+      vbo[j++] = ns[arr[idx]].y;
+      vbo[j++] = ns[arr[idx]].z;
+    }
+  }
+}
+
+void update_visual_faces(float* vbo) {
+  if (h_visual_count <= 0) return;
+  _update_visual_faces<<<(h_visual_count + N_THREADS - 1) / N_THREADS, N_THREADS>>>(vbo, h_visual_count);
 }
 
 }

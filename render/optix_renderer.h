@@ -40,6 +40,9 @@ private:
   optix::Program _material_mirror_closest_hit = 0;
   optix::Program _material_mirror_any_hit = 0;
   optix::Program _material_mirror_shadow_any_hit = 0;
+  optix::Program _material_foam_closest_hit = 0;
+  optix::Program _material_foam_any_hit = 0;
+  optix::Program _material_foam_shadow_any_hit = 0;
 
   optix::Transform getObjectTransform(std::shared_ptr<Object> obj);
   optix::Geometry getMeshGeometry(std::shared_ptr<TriangleMesh> mesh);
@@ -75,7 +78,7 @@ private:
   optix::Context context = 0;
   GLuint outputVBO = 0;
 
-  uint32_t nSamplesSqrt = 1;
+  uint32_t nSamplesSqrt = 4;
 
  public:
   void renderScene(std::shared_ptr<Scene> scene);

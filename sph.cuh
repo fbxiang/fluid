@@ -26,6 +26,14 @@ void update_factor();
 
 void update_debug_points(float* vbo);
 
+namespace visual {
+void init();
+void visual_step();
+int get_num_visual_particles();
+void update_debug_points(float *vbo);
+void update_visual_faces(float *vbo);
+}
+
 namespace mc {
 
 int get_num_cells();

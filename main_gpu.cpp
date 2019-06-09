@@ -133,6 +133,7 @@ int main() {
   fs.set_domain({-0.814, 0.028, -0.5}, {1.37, 2, 0.85});
   fs.cuda_init();
   fs.marching_cube_init();
+  fs.visual_particle_init();
   std::vector<glm::vec3> positions = fill_prism({-0.812, 0.04, -0.45}, {1.3, 0.4, 0.4}, h);
   fs.add_particles(positions);
 
@@ -141,8 +142,8 @@ int main() {
   uint32_t W = 1200, H = 900;
   init(W, H);
 
-  // RaytraceUtil ru(&fs, W, H);
-  GPURenderUtil ru(&fs, W, H);
+  RaytraceUtil ru(&fs, W, H);
+  // GPURenderUtil ru(&fs, W, H);
   // ru.renderer->debug = 3;
 
   fs.sim_init();
@@ -180,7 +181,7 @@ int main() {
 
     profiler::start("render");
     ru.render();
-    // ru.renderToFile("/tmp/sph", frame);
+    ru.renderToFile("/tmp/sph", frame);
     if (!paused) {
       ru.invalidate_camera();
     }
@@ -200,6 +201,7 @@ int main() {
     // physics
     while (time < 1.f / 120.f) {
       float dt = fs.step();
+      sph::visual::visual_step();
       fs.update_mesh();
       // printf("Time step: %f\n", dt);
       time += dt;
