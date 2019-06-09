@@ -22,7 +22,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(OpenGL)
 find_package(GLEW)
 find_package(glfw3)
-find_package(Boost COMPONENTS unit_test_framework REQUIRED)
 
 file(GLOB_RECURSE RENDER_SRC "render/*.h" "render/*.cpp")
 
