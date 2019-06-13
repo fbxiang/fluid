@@ -181,7 +181,7 @@ int main() {
 
     profiler::start("render");
     ru.render();
-    ru.renderToFile("/tmp/sph", frame);
+    // ru.renderToFile("/tmp/sph", frame);
     if (!paused) {
       ru.invalidate_camera();
     }

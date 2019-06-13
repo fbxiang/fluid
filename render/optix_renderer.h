@@ -78,7 +78,7 @@ private:
   optix::Context context = 0;
   GLuint outputVBO = 0;
 
-  uint32_t nSamplesSqrt = 4;
+  uint32_t nSamplesSqrt = 1;
 
  public:
   void renderScene(std::shared_ptr<Scene> scene);

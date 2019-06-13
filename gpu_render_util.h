@@ -44,7 +44,7 @@ public:
     setupEmpty(scene, width, height);
     // setupSponza(scene, width, height);
 
-    int mc_num_cells = system->get_mc_num_cells();
+    // int mc_num_cells = system->get_mc_num_cells();
 
     // std::shared_ptr<DynamicMesh> mesh =
     //     std::make_shared<DynamicMesh>(std::min(mc_num_cells * 15, 3 * MAX_FACES));
@@ -127,7 +127,7 @@ public:
 
   void init_debug_particles() {
     std::vector<glm::vec3> positions = fluid_system->get_particles();
-    for (int i = 0; i < positions.size(); ++i) {
+    for (uint32_t i = 0; i < positions.size(); ++i) {
       auto p = NewSphere();
       p->scale = glm::vec3(fluid_system->solver_params.particle_size / 2);
       p->material.kd = {0, 1, 1};
